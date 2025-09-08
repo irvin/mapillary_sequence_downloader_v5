@@ -116,10 +116,10 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     if camera_model:
         zeroth_ifd[piexif.ImageIFD.Model] = camera_model
 
-    # Camera information
+    # Camera information (with microsecond precision)
     exif_ifd = {
-        piexif.ExifIFD.DateTimeOriginal: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
-        piexif.ExifIFD.DateTimeDigitized: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
+        piexif.ExifIFD.DateTimeOriginal: capture_time.strftime('%Y:%m:%d %H:%M:%S.%f')[:-3],  # Keep milliseconds
+        piexif.ExifIFD.DateTimeDigitized: capture_time.strftime('%Y:%m:%d %H:%M:%S.%f')[:-3],  # Keep milliseconds
     }
 
     # Add camera settings if available from metadata
@@ -287,8 +287,16 @@ def main():
                 img_data  # Pass all image metadata
             )
 
+            # Generate filename based on capture time
+            if 'captured_at' in img_data and img_data['captured_at']:
+                timestamp_sec = img_data['captured_at'] / 1000.0
+                capture_time = datetime.fromtimestamp(timestamp_sec)
+                filename = f"{capture_time.strftime('%Y%m%d_%H%M%S')}_{capture_time.strftime('%f')[:3]}.jpg"
+            else:
+                filename = f"{img_id['id']}.jpg"
+
             # Save image
-            output_path = f"{output_dir}/{img_id['id']}.jpg"
+            output_path = f"{output_dir}/{filename}"
             if exif_bytes:
                 image.save(output_path, exif=exif_bytes, quality=95)
                 logger.info(f"✅ Image saved with GPS EXIF data: {output_path}")
