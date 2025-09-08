@@ -57,6 +57,12 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         piexif.GPSIFD.GPSDateStamp: capture_time.strftime('%Y:%m:%d')
     }
 
+    # Add compass angle if available
+    if image_metadata and image_metadata.get('compass_angle'):
+        compass_angle = image_metadata['compass_angle']
+        gps_ifd[piexif.GPSIFD.GPSImgDirection] = (int(compass_angle * 100), 100)
+        gps_ifd[piexif.GPSIFD.GPSImgDirectionRef] = 'T'  # True direction
+
     # Only add altitude information if available
     if altitude is not None:
         gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0  # Above sea level
@@ -116,6 +122,17 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         if image_metadata.get('focal_length'):
             exif_ifd[piexif.ExifIFD.FocalLength] = (int(image_metadata['focal_length'] * 100), 100)
 
+        # Calculate focal length from camera_parameters if available
+        elif image_metadata.get('camera_parameters') and image_width and image_height:
+            # camera_parameters[0] is focal length in relative units
+            # Convert to pixels: focal_length_pixels = relative_focal_length * max(width, height)
+            relative_focal_length = image_metadata['camera_parameters'][0]
+            focal_length_pixels = relative_focal_length * max(image_width, image_height)
+            # Convert to mm (assuming 35mm equivalent sensor)
+            # This is an approximation - actual conversion depends on sensor size
+            focal_length_mm = focal_length_pixels * 0.036  # 36mm sensor width approximation
+            exif_ifd[piexif.ExifIFD.FocalLength] = (int(focal_length_mm * 100), 100)
+
         # Add ISO if available
         if image_metadata.get('iso'):
             exif_ifd[piexif.ExifIFD.ISOSpeedRatings] = image_metadata['iso']
@@ -136,7 +153,7 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         zeroth_ifd[piexif.ImageIFD.ImageWidth] = image_width
         zeroth_ifd[piexif.ImageIFD.ImageLength] = image_height
 
-    # Add comprehensive Mapillary information to UserComment
+    # Add Mapillary-specific information to UserComment (only data without standard EXIF fields)
     mapillary_info = f"Mapillary Image ID: {image_id}"
     if sequence_id:
         mapillary_info += f" | Sequence: {sequence_id}"
@@ -144,12 +161,18 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         mapillary_info += f" | Creator: {image_metadata['creator_username']}"
     if image_metadata and image_metadata.get('camera_type'):
         mapillary_info += f" | Camera Type: {image_metadata['camera_type']}"
-    if image_metadata and image_metadata.get('compass_angle'):
-        mapillary_info += f" | Compass: {image_metadata['compass_angle']}°"
     if image_metadata and image_metadata.get('computed_compass_angle'):
         mapillary_info += f" | Computed Compass: {image_metadata['computed_compass_angle']}°"
-    if image_metadata and image_metadata.get('computed_altitude'):
-        mapillary_info += f" | Computed Alt: {image_metadata['computed_altitude']}m"
+    if image_metadata and image_metadata.get('atomic_scale'):
+        mapillary_info += f" | Atomic Scale: {image_metadata['atomic_scale']}"
+    if image_metadata and image_metadata.get('camera_parameters'):
+        params = image_metadata['camera_parameters']
+        # Only include principal point parameters (not focal length as it's now in EXIF)
+        mapillary_info += f" | Principal Point: [{params[1]:.3f}, {params[2]:.3f}]"
+    if image_metadata and image_metadata.get('mesh'):
+        mapillary_info += f" | Mesh ID: {image_metadata['mesh']['id']}"
+    if image_metadata and image_metadata.get('sfm_cluster'):
+        mapillary_info += f" | SfM Cluster: {image_metadata['sfm_cluster']['id']}"
     mapillary_info += f" | Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
     exif_ifd[piexif.ExifIFD.UserComment] = mapillary_info.encode('utf-8')
@@ -211,9 +234,11 @@ def main():
         try:
             logger.info(f"Processing image {i}/{len(image_ids)}: {img_id['id']}")
 
-            # Get basic image information with minimal fields to avoid 500 errors
+            # Get comprehensive image information with additional fields
             fields = [
-                'thumb_original_url', 'geometry', 'captured_at', 'compass_angle', 'camera_type', 'computed_altitude', 'computed_compass_angle', 'sequence'
+                'thumb_original_url', 'geometry', 'captured_at', 'compass_angle', 'camera_type',
+                'computed_altitude', 'computed_compass_angle', 'sequence', 'camera_parameters',
+                'atomic_scale', 'computed_geometry', 'mesh', 'sfm_cluster'
             ]
             image_url = f"https://graph.mapillary.com/{img_id['id']}?fields={','.join(fields)}"
             img_r = requests.get(image_url, headers=header, timeout=30)
@@ -241,10 +266,18 @@ def main():
             img_data['width'] = actual_width
             img_data['height'] = actual_height
 
+            # Use computed_geometry if available (more accurate), otherwise use geometry
+            if 'computed_geometry' in img_data and img_data['computed_geometry']:
+                coords = img_data['computed_geometry']['coordinates']
+                logger.info("Using computed_geometry for more accurate GPS coordinates")
+            else:
+                coords = img_data['geometry']['coordinates']
+                logger.info("Using standard geometry for GPS coordinates")
+
             # Add comprehensive GPS EXIF data
             exif_bytes = add_gps_exif_data(
-                img_data['geometry']['coordinates'][1],  # latitude
-                img_data['geometry']['coordinates'][0],  # longitude
+                coords[1],  # latitude
+                coords[0],  # longitude
                 img_id['id'],
                 sequence_id,
                 img_data  # Pass all image metadata
