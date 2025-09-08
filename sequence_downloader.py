@@ -6,14 +6,6 @@ import time
 from datetime import datetime
 import logging
 
-# Load parameters from config file
-try:
-    from config import access_token, sequence_id
-except ImportError:
-    print("❌ config.py file not found!")
-    print("Please create config.py file and set your access_token and sequence_id")
-    exit(1)
-
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -213,10 +205,32 @@ def download_image_with_retry(url, max_retries=3):
             else:
                 raise e
 
-def main():
+def main(sequence_id):
+    """
+    Main function to download all images in a sequence
+
+    Args:
+        sequence_id (str): Sequence ID to download
+    """
+    # Get access_token from config file
+    try:
+        from config import access_token
+    except ImportError:
+        logger.error("❌ config.py file not found!")
+        logger.error("Please create config.py file and set your access_token")
+        logger.error("You can copy config.example.py to config.py as a template")
+        exit(1)
+
+    if not access_token:
+        logger.error("access_token is required in config.py")
+        exit(1)
+
+    if not sequence_id:
+        logger.error("sequence_id is required")
+        exit(1)
+
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
-
 
     # Get all image IDs in the sequence
     logger.info(f"Getting image list for sequence {sequence_id}...")
