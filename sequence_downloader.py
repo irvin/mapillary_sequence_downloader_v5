@@ -205,12 +205,13 @@ def download_image_with_retry(url, max_retries=3):
             else:
                 raise e
 
-def main(sequence_id):
+def main(sequence_id, quality=None):
     """
     Main function to download all images in a sequence
 
     Args:
         sequence_id (str): Sequence ID to download
+        quality (int, optional): JPEG quality (1-100). If None, saves original quality
     """
     # Get access_token from config file
     try:
@@ -326,11 +327,19 @@ def main(sequence_id):
             # Save image
             output_path = f"{output_dir}/{filename}"
             if exif_bytes:
-                image.save(output_path, exif=exif_bytes, quality=95)
-                logger.info(f"✅ Image saved with GPS EXIF data: {output_path}")
+                if quality is not None:
+                    image.save(output_path, exif=exif_bytes, quality=quality)
+                    logger.info(f"✅ Image saved with GPS EXIF data (quality {quality}): {output_path}")
+                else:
+                    image.save(output_path, exif=exif_bytes)
+                    logger.info(f"✅ Image saved with GPS EXIF data (original quality): {output_path}")
             else:
-                image.save(output_path, quality=95)
-                logger.info(f"✅ Image saved (no EXIF data): {output_path}")
+                if quality is not None:
+                    image.save(output_path, quality=quality)
+                    logger.info(f"✅ Image saved (quality {quality}): {output_path}")
+                else:
+                    image.save(output_path)
+                    logger.info(f"✅ Image saved (original quality): {output_path}")
 
             # Add delay to avoid rate limiting
             time.sleep(0.5)
@@ -343,8 +352,12 @@ def main(sequence_id):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) != 2:
-        print("Usage: python3 sequence_downloader.py <sequence_id>")
-        print("Example: python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0")
-        sys.exit(1)
-    main(sys.argv[1])
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Download Mapillary sequence images with EXIF data')
+    parser.add_argument('sequence_id', help='Sequence ID to download')
+    parser.add_argument('-q', '--quality', type=int, choices=range(1, 101),
+                       help='JPEG quality (1-100). If not specified, saves original quality')
+
+    args = parser.parse_args()
+    main(args.sequence_id, args.quality)

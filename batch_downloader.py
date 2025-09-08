@@ -32,7 +32,7 @@ def read_sequences_from_file(filename):
         logger.error(f"Error reading file: {e}")
         return []
 
-def download_sequences(sequence_ids, delay=1.0):
+def download_sequences(sequence_ids, delay=1.0, quality=None):
     """Batch download sequences"""
     total = len(sequence_ids)
     successful = 0
@@ -44,8 +44,8 @@ def download_sequences(sequence_ids, delay=1.0):
         logger.info(f"Processing sequence {i}/{total}: {sequence_id}")
 
         try:
-            # Download single sequence, only pass sequence_id
-            download_single_sequence(sequence_id)
+            # Download single sequence with quality parameter
+            download_single_sequence(sequence_id, quality)
 
             successful += 1
             logger.info(f"✅ Sequence {sequence_id} download completed")
@@ -63,15 +63,14 @@ def download_sequences(sequence_ids, delay=1.0):
 
 def main():
     """Main program"""
-    if len(sys.argv) != 2:
-        print("Usage: python3 batch_downloader.py <sequences_file>")
-        print("Example: python3 batch_downloader.py sequences.txt")
-        print("\nsequences.txt format:")
-        print("# This is a comment line")
-        print("gEMwF50mdNXOlW7qJUaiRv")
-        print("another_sequence_id")
-        print("yet_another_sequence_id")
-        sys.exit(1)
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Batch download Mapillary sequences')
+    parser.add_argument('sequences_file', help='File containing sequence IDs')
+    parser.add_argument('-q', '--quality', type=int, choices=range(1, 101),
+                       help='JPEG quality (1-100). If not specified, saves original quality')
+
+    args = parser.parse_args()
 
     # Check if config.py exists
     if not os.path.exists("config.py"):
@@ -80,7 +79,7 @@ def main():
         logger.error("You can copy config.example.py to config.py as a template")
         sys.exit(1)
 
-    sequences_file = sys.argv[1]
+    sequences_file = args.sequences_file
 
     # Read sequences
     sequences = read_sequences_from_file(sequences_file)
@@ -100,7 +99,7 @@ def main():
         sys.exit(0)
 
     # Start download
-    download_sequences(sequences)
+    download_sequences(sequences, quality=args.quality)
 
 if __name__ == "__main__":
     main()
