@@ -1,0 +1,9 @@
+# Mapillary Sequences 列表
+# 每行一個 sequence ID，以 # 開頭的行會被忽略
+
+# 範例 sequence (請替換為您的實際 sequence IDs)
+abcdefgh....sequence_id
+
+# 添加更多 sequences:
+# another_sequence_id
+# yet_another_sequence_id
