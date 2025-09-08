@@ -62,25 +62,25 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0  # Above sea level
         gps_ifd[piexif.GPSIFD.GPSAltitude] = (altitude, 100)
 
-    # Basic image information
-    camera_make = 'Unknown'
-    camera_model = 'Unknown'
+    # Basic image information - only use if available from metadata
+    camera_make = None
+    camera_model = None
 
     if image_metadata:
-        camera_make = image_metadata.get('camera_make', camera_make)
-        camera_model = image_metadata.get('camera_model', camera_model)
+        camera_make = image_metadata.get('camera_make')
+        camera_model = image_metadata.get('camera_model')
 
-    # Get image dimensions
-    image_width = 0
-    image_height = 0
+    # Get image dimensions - only use if available from metadata
+    image_width = None
+    image_height = None
     if image_metadata:
-        image_width = image_metadata.get('width', 0)
-        image_height = image_metadata.get('height', 0)
+        image_width = image_metadata.get('width')
+        image_height = image_metadata.get('height')
 
     # Determine image orientation based on dimensions
     # 1 = normal, 3 = 180°, 6 = 90° clockwise, 8 = 90° counter-clockwise
     orientation = 1  # default normal orientation
-    if image_width > 0 and image_height > 0:
+    if image_width and image_height and image_width > 0 and image_height > 0:
         if image_width > image_height:
             orientation = 1  # landscape
         else:
@@ -90,8 +90,6 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     dpi = 72
 
     zeroth_ifd = {
-        piexif.ImageIFD.Make: camera_make,
-        piexif.ImageIFD.Model: camera_model,
         piexif.ImageIFD.Software: 'Mapillary Sequence Downloader v4',
         piexif.ImageIFD.DateTime: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
         piexif.ImageIFD.XResolution: (dpi, 1),
@@ -99,6 +97,12 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         piexif.ImageIFD.ResolutionUnit: 2,  # Inches
         piexif.ImageIFD.Orientation: orientation,
     }
+
+    # Only add camera information if available from metadata
+    if camera_make:
+        zeroth_ifd[piexif.ImageIFD.Make] = camera_make
+    if camera_model:
+        zeroth_ifd[piexif.ImageIFD.Model] = camera_model
 
     # Camera information
     exif_ifd = {
@@ -125,7 +129,7 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
             exif_ifd[piexif.ExifIFD.FNumber] = (int(image_metadata['aperture'] * 100), 100)
 
     # Add image dimensions if available
-    if image_width > 0 and image_height > 0:
+    if image_width and image_height and image_width > 0 and image_height > 0:
         exif_ifd[piexif.ExifIFD.PixelXDimension] = image_width
         exif_ifd[piexif.ExifIFD.PixelYDimension] = image_height
         # Also add to zeroth IFD for better compatibility
