@@ -68,32 +68,48 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     capture_time = datetime.now()
 
     if image_metadata and image_metadata.get('captured_at'):
+        # Log original captured_at value for debugging
+        original_captured_at = image_metadata['captured_at']
+        logger.info(f"🔍 DEBUG - Original captured_at: {original_captured_at} (type: {type(original_captured_at)})")
+
         # Try to infer timezone from GPS coordinates
         if latitude and longitude:
             try:
                 # Simple timezone inference based on longitude
                 # This is a rough approximation - in practice you'd use a proper timezone library
                 tz_offset = int(longitude / 15)  # Rough timezone calculation
+                logger.info(f"🔍 DEBUG - GPS coordinates: lat={latitude}, lon={longitude}")
+                logger.info(f"🔍 DEBUG - Calculated timezone offset: {tz_offset} hours")
                 logger.info(f"Inferred timezone offset from GPS: UTC{tz_offset:+d}")
-            except:
+            except Exception as e:
                 tz_offset = 0
-                logger.warning("Could not infer timezone from GPS, using UTC")
+                logger.warning(f"Could not infer timezone from GPS: {e}, using UTC")
         else:
             tz_offset = 0
             logger.warning("No GPS coordinates available, using UTC")
 
-        # Mapillary timestamp is in local timezone, convert to UTC
+        # Convert timestamp to seconds and log
+        timestamp_sec = original_captured_at / 1000.0
+        logger.info(f"🔍 DEBUG - Timestamp in seconds: {timestamp_sec}")
+        logger.info(f"🔍 DEBUG - Unix timestamp: {int(timestamp_sec)}")
+
+        # Mapillary timestamp is in local timezone, convert to UTC for EXIF data
         if tz_offset != 0:
             tz = timezone(timedelta(hours=tz_offset))
-            capture_time_local = datetime.fromtimestamp(image_metadata['captured_at'] / 1000, tz=tz)
-            capture_time = capture_time_local.astimezone(timezone.utc)  # Convert to UTC
+            capture_time_local = datetime.fromtimestamp(timestamp_sec, tz=tz)
+            capture_time = capture_time_local.astimezone(timezone.utc)  # Convert to UTC for EXIF
+            logger.info(f"🔍 DEBUG - Local timezone: {tz}")
+            logger.info(f"🔍 DEBUG - Local time: {capture_time_local}")
+            logger.info(f"🔍 DEBUG - UTC time: {capture_time}")
             logger.info(f"Mapillary local time: {capture_time_local.strftime('%Y-%m-%d %H:%M:%S %Z')} -> UTC: {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         else:
             # Assume UTC if no timezone info
-            capture_time = datetime.fromtimestamp(image_metadata['captured_at'] / 1000, tz=timezone.utc)
+            capture_time = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+            logger.info(f"🔍 DEBUG - Using UTC timezone (no GPS timezone inference)")
+            logger.info(f"🔍 DEBUG - UTC time: {capture_time}")
             logger.info(f"Mapillary timestamp (UTC): {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-    # Convert to UTC for GPS timestamp
+    # Convert to UTC for GPS timestamp (keep original EXIF behavior)
     gps_time = capture_time.utctimetuple()
 
     gps_ifd = {
@@ -369,17 +385,25 @@ def main(sequence_id, quality=None, specific_images=None):
                             longitude = coords[0]
                             tz_offset = int(longitude / 15)  # Rough timezone calculation
 
-                    # Mapillary timestamp is in local timezone, convert to UTC
+                    # Mapillary timestamp is in local timezone, keep as local time for folder naming
                     timestamp_sec = img_data['captured_at'] / 1000.0
+                    logger.info(f"🔍 DEBUG - Folder naming - Original captured_at: {img_data['captured_at']}")
+                    logger.info(f"🔍 DEBUG - Folder naming - Timestamp in seconds: {timestamp_sec}")
+                    logger.info(f"🔍 DEBUG - Folder naming - Timezone offset: {tz_offset}")
+
                     if tz_offset != 0:
                         tz = timezone(timedelta(hours=tz_offset))
-                        first_image_timestamp_local = datetime.fromtimestamp(timestamp_sec, tz=tz)
-                        first_image_timestamp = first_image_timestamp_local.astimezone(timezone.utc)
+                        first_image_timestamp = datetime.fromtimestamp(timestamp_sec, tz=tz)
+                        logger.info(f"🔍 DEBUG - Folder naming - Using GPS timezone: {tz}")
                     else:
-                        first_image_timestamp = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+                        # If no timezone info, use local system timezone
+                        first_image_timestamp = datetime.fromtimestamp(timestamp_sec)
+                        logger.info(f"🔍 DEBUG - Folder naming - Using system timezone")
 
-                    # Create folder name with date and time
+                    logger.info(f"🔍 DEBUG - Folder naming - Local timestamp: {first_image_timestamp}")
+                    # Create folder name with local date and time
                     folder_name = f"{first_image_timestamp.strftime('%Y%m%d_%H%M%S')}_{sequence_id[:8]}"
+                    logger.info(f"🔍 DEBUG - Folder naming - Generated folder name: {folder_name}")
                 else:
                     # Fallback to sequence ID if no timestamp
                     folder_name = sequence_id
@@ -432,7 +456,7 @@ def main(sequence_id, quality=None, specific_images=None):
                 })
                 logger.warning(f"⚠️  EXIF creation failed for image {img_id['id']}")
 
-            # Generate filename based on capture time
+            # Generate filename based on capture time (use local time for filename only)
             if 'captured_at' in img_data and img_data['captured_at']:
                 # Determine timezone offset from GPS coordinates
                 tz_offset = 0
@@ -443,16 +467,25 @@ def main(sequence_id, quality=None, specific_images=None):
                         longitude = coords[0]
                         tz_offset = int(longitude / 15)  # Rough timezone calculation
 
-                # Mapillary timestamp is in local timezone, convert to UTC
+                # Mapillary timestamp is in local timezone, keep as local time for filename
                 timestamp_sec = img_data['captured_at'] / 1000.0
+                logger.info(f"🔍 DEBUG - Filename naming - Original captured_at: {img_data['captured_at']}")
+                logger.info(f"🔍 DEBUG - Filename naming - Timestamp in seconds: {timestamp_sec}")
+                logger.info(f"🔍 DEBUG - Filename naming - Timezone offset: {tz_offset}")
+
                 if tz_offset != 0:
                     tz = timezone(timedelta(hours=tz_offset))
                     capture_time_local = datetime.fromtimestamp(timestamp_sec, tz=tz)
-                    capture_time = capture_time_local.astimezone(timezone.utc)
+                    logger.info(f"🔍 DEBUG - Filename naming - Using GPS timezone: {tz}")
                 else:
-                    capture_time = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+                    # If no timezone info, use local system timezone
+                    capture_time_local = datetime.fromtimestamp(timestamp_sec)
+                    logger.info(f"🔍 DEBUG - Filename naming - Using system timezone")
 
-                filename = f"{capture_time.strftime('%Y%m%d_%H%M%S')}_{capture_time.strftime('%f')[:3]}.jpg"
+                logger.info(f"🔍 DEBUG - Filename naming - Local timestamp: {capture_time_local}")
+                logger.info(f"🔍 DEBUG - Filename naming - Microseconds: {capture_time_local.strftime('%f')}")
+                filename = f"{capture_time_local.strftime('%Y%m%d_%H%M%S')}_{capture_time_local.strftime('%f')[:3]}.jpg"
+                logger.info(f"🔍 DEBUG - Filename naming - Generated filename: {filename}")
             else:
                 filename = f"{img_id['id']}.jpg"
 
