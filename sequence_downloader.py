@@ -57,17 +57,17 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         piexif.GPSIFD.GPSDateStamp: capture_time.strftime('%Y:%m:%d')
     }
 
-    # Add compass angle if available
-    if image_metadata and image_metadata.get('compass_angle'):
-        compass_angle = image_metadata['compass_angle']
-        gps_ifd[piexif.GPSIFD.GPSImgDirection] = (int(compass_angle * 100), 100)
-        gps_ifd[piexif.GPSIFD.GPSImgDirectionRef] = 'T'  # True direction
-
-    # Add computed compass angle if available (more accurate)
+    # Add compass angle if available (using computed_compass_angle for GPSImgDirection as it's more accurate)
     if image_metadata and image_metadata.get('computed_compass_angle'):
         computed_compass_angle = image_metadata['computed_compass_angle']
-        gps_ifd[piexif.GPSIFD.GPSDestBearing] = (int(computed_compass_angle * 100), 100)
-        gps_ifd[piexif.GPSIFD.GPSDestBearingRef] = 'T'  # True direction
+        gps_ifd[piexif.GPSIFD.GPSImgDirection] = (int(computed_compass_angle * 100), 100)
+        gps_ifd[piexif.GPSIFD.GPSImgDirectionRef] = 'T'  # True direction
+
+    # Add original compass angle as additional info (not used for main direction)
+    # if image_metadata and image_metadata.get('compass_angle'):
+    #     compass_angle = image_metadata['compass_angle']
+    #     gps_ifd[piexif.GPSIFD.GPSDestBearing] = (int(compass_angle * 100), 100)
+    #     gps_ifd[piexif.GPSIFD.GPSDestBearingRef] = 'T'  # True direction
 
     # Only add altitude information if available
     if altitude is not None:
