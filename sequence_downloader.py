@@ -20,8 +20,8 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         s = (value - d - m/60) * 3600
         return d, m, s
 
-    lat_deg = convert_to_degrees(latitude)
-    lon_deg = convert_to_degrees(longitude)
+    lat_deg = convert_to_degrees(abs(latitude))
+    lon_deg = convert_to_degrees(abs(longitude))
 
     # GPS information - only use if available from metadata
     altitude = None
