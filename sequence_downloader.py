@@ -63,6 +63,12 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         gps_ifd[piexif.GPSIFD.GPSImgDirection] = (int(compass_angle * 100), 100)
         gps_ifd[piexif.GPSIFD.GPSImgDirectionRef] = 'T'  # True direction
 
+    # Add computed compass angle if available (more accurate)
+    if image_metadata and image_metadata.get('computed_compass_angle'):
+        computed_compass_angle = image_metadata['computed_compass_angle']
+        gps_ifd[piexif.GPSIFD.GPSDestBearing] = (int(computed_compass_angle * 100), 100)
+        gps_ifd[piexif.GPSIFD.GPSDestBearingRef] = 'T'  # True direction
+
     # Only add altitude information if available
     if altitude is not None:
         gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0  # Above sea level
@@ -161,8 +167,6 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         mapillary_info += f" | Creator: {image_metadata['creator_username']}"
     if image_metadata and image_metadata.get('camera_type'):
         mapillary_info += f" | Camera Type: {image_metadata['camera_type']}"
-    if image_metadata and image_metadata.get('computed_compass_angle'):
-        mapillary_info += f" | Computed Compass: {image_metadata['computed_compass_angle']}°"
     if image_metadata and image_metadata.get('atomic_scale'):
         mapillary_info += f" | Atomic Scale: {image_metadata['atomic_scale']}"
     if image_metadata and image_metadata.get('camera_parameters'):
