@@ -9,7 +9,6 @@ A Python script for downloading Mapillary sequence images and adding GPS EXIF da
 
 - 🗺️ Download all images from a Mapillary sequence
 - 📍 Automatically add GPS coordinates to EXIF data
-- 🔍 Get image detection data (traffic signs, objects, etc.)
 - 📊 Detailed progress tracking and logging
 - 🔄 Automatic retry mechanism
 - ⚡ Rate limiting protection

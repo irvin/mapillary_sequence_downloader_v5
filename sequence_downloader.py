@@ -84,23 +84,6 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None):
         logger.warning(f"Failed to create EXIF data: {e}")
         return None
 
-def get_image_detections(image_id, access_token):
-    """
-    Get image detection data (traffic signs, objects, etc.)
-    """
-    try:
-        detections_url = f"https://graph.mapillary.com/{image_id}/detections"
-        headers = {'Authorization': f'OAuth {access_token}'}
-        response = requests.get(detections_url, headers=headers, timeout=10)
-
-        if response.status_code == 200:
-            return response.json().get('data', [])
-        else:
-            logger.warning(f"Failed to get detection data for {image_id}: {response.status_code}")
-            return []
-    except Exception as e:
-        logger.warning(f"Error getting detection data: {e}")
-        return []
 
 def download_image_with_retry(url, max_retries=3):
     """
@@ -150,9 +133,6 @@ def main():
             img_r.raise_for_status()
             img_data = img_r.json()
 
-            # Get detection data
-            detections = get_image_detections(img_id['id'], access_token)
-
             # Download image
             image_get_url = img_data['thumb_original_url']
             logger.info(f"Downloading image...")
@@ -182,11 +162,6 @@ def main():
             else:
                 image.save(output_path, quality=95)
                 logger.info(f"✅ Image saved (no EXIF data): {output_path}")
-
-            # Log detected objects
-            if detections:
-                detection_types = [d.get('value', 'unknown') for d in detections]
-                logger.info(f"🔍 Detected {len(detections)} objects: {', '.join(set(detection_types))}")
 
             # Add delay to avoid rate limiting
             time.sleep(0.5)
