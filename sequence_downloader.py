@@ -102,7 +102,7 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     dpi = 72
 
     zeroth_ifd = {
-        piexif.ImageIFD.Software: 'Mapillary Sequence Downloader v4',
+        piexif.ImageIFD.Software: 'Mapillary Sequence Downloader v5',
         piexif.ImageIFD.DateTime: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
         piexif.ImageIFD.XResolution: (dpi, 1),
         piexif.ImageIFD.YResolution: (dpi, 1),

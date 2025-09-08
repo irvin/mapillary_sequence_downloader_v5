@@ -53,8 +53,8 @@ python3 sequence_downloader.py
 
 ## File Structure
 
-```
-mapillary_sequence_downloader_v4/
+```text
+mapillary_sequence_downloader_v5/
 ├── sequence_downloader.py        # Main script
 ├── config.py                     # Config file (not uploaded to git)
 ├── config.example.py             # Example config file
