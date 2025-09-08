@@ -13,11 +13,12 @@ from config import access_token
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_all_user_sequences(username, max_pages=None, camera_type_filter=None):
+def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, output_file=None):
     """Get all sequences for specified user with optional camera type filtering"""
     header = {'Authorization': f'OAuth {access_token}'}
     sequences = set()
     all_images = []
+    new_sequences = set()  # Track new sequences found in current page
 
     logger.info(f"Starting search for all sequences of user {username}...")
     if camera_type_filter:
@@ -38,6 +39,9 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None):
             images = data.get('data', [])
             logger.info(f"Found {len(images)} images")
 
+            # Reset new sequences for this page
+            new_sequences.clear()
+
             # Extract sequences with optional camera type filtering
             for img in images:
                 # Apply camera type filter if specified
@@ -48,7 +52,20 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None):
 
                 all_images.append(img)
                 if 'sequence' in img and img['sequence']:
-                    sequences.add(img['sequence'])
+                    seq_id = img['sequence']
+                    if seq_id not in sequences:
+                        sequences.add(seq_id)
+                        new_sequences.add(seq_id)
+
+            # Write new sequences to file immediately
+            if output_file and new_sequences:
+                try:
+                    with open(output_file, 'a', encoding='utf-8') as f:
+                        for seq_id in sorted(new_sequences):
+                            f.write(f"{seq_id}\n")
+                    logger.info(f"Added {len(new_sequences)} new sequences to {output_file}")
+                except Exception as e:
+                    logger.error(f"Error writing to file {output_file}: {e}")
 
             # Check if there's a next page
             if 'paging' in data and 'next' in data['paging']:
@@ -191,8 +208,26 @@ def main():
         print(f"Filtering for camera type: {camera_type_filter}")
     print()
 
-    # Search sequences
-    sequences, images = get_all_user_sequences(username, max_pages, camera_type_filter)
+    # Prepare output file
+    output_file = f"sequences_{username}.txt"
+
+    # Clear existing file and add header
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(f"# Found Sequences (Search in progress...)\n")
+            f.write(f"# Search User: {username}\n")
+            f.write(f"# Search Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"# Max Pages: {max_pages if max_pages else 'All'}\n")
+            f.write(f"# Camera Type Filter: {camera_type_filter if camera_type_filter else 'All'}\n")
+            f.write(f"# Filter Type: {args.filter}\n\n")
+        print(f"📝 Output file prepared: {output_file}")
+    except Exception as e:
+        logger.error(f"Error preparing output file: {e}")
+        print(f"❌ Error preparing output file: {e}")
+        return
+
+    # Search sequences with real-time file writing
+    sequences, images = get_all_user_sequences(username, max_pages, camera_type_filter, output_file)
 
     if not sequences:
         print("No sequences found")
@@ -207,12 +242,23 @@ def main():
     # Analyze sequences
     analyze_sequences(sequences, images)
 
-    # Save to file
-    filename = save_sequences_to_file(sequences, username)
-    if filename:
-        print(f"\n✅ Sequences saved to {filename}")
+    # Update file header with final count
+    try:
+        with open(output_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Update the first line with final count
+        lines[0] = f"# Found Sequences (Total: {len(sequences)})\n"
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+
+        print(f"\n✅ All sequences saved to {output_file}")
         print(f"\nYou can use the following command for batch download:")
-        print(f"python3 batch_downloader.py {filename}")
+        print(f"python3 batch_downloader.py {output_file}")
+    except Exception as e:
+        logger.error(f"Error updating file header: {e}")
+        print(f"\n✅ Sequences saved to {output_file} (header update failed)")
 
     print(f"\nSearch completed!")
 
