@@ -8,6 +8,7 @@ A comprehensive Python toolkit for downloading Mapillary sequence images with en
 ## Features
 
 - 🗺️ Download all images from Mapillary sequences
+- 🎯 Download specific images from sequences
 - 📍 Automatically add comprehensive GPS and camera EXIF data
 - 📊 Detailed progress tracking and logging
 - 🔄 Automatic retry mechanism with rate limiting
@@ -65,6 +66,53 @@ python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0
 # Download with specific quality (1-100)
 python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0 -q 95
 ```
+
+### 1.1. Download Specific Images
+
+Download only selected images from a sequence instead of all images:
+
+```bash
+# Download specific images by ID
+python3 sequence_downloader.py <sequence_id> -i IMAGE_ID1 IMAGE_ID2 IMAGE_ID3
+
+# Download from file containing image IDs
+python3 sequence_downloader.py <sequence_id> --image-file images.txt
+
+# Download specific images with quality setting
+python3 sequence_downloader.py <sequence_id> -i IMAGE_ID -q 90
+```
+
+**Examples:**
+
+```bash
+# Download a single specific image
+python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0 -i 24595874160038714
+
+# Download multiple specific images
+python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0 -i 2704375453287221 1096196825786899
+
+# Download from file
+python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0 --image-file failed_images.txt
+```
+
+**Image List File Format:**
+
+Create a text file with image IDs (one per line):
+
+```text
+# Failed images list
+# Use this file to re-download problematic images
+24595874160038714
+1234567890123456
+# Another failed image
+9876543210987654
+```
+
+**Use Cases:**
+
+- Re-downloading failed images
+- Testing specific problematic images
+- Downloading only selected images from a sequence
 
 ### 2. Find All Sequences for a User
 
@@ -150,6 +198,8 @@ mapillary_sequence_downloader_v4/
 ├── config.example.py             # Example config file
 ├── .gitignore                    # Git ignore file
 ├── sequences_*.txt               # Generated sequence lists
+├── logs/                         # Log files directory
+│   └── sequence_*.log            # Detailed download logs
 └── downloads/                    # Downloaded images directory
     ├── 20250728_180730_3NpXMDuH/    # Time-based folder names
     │   ├── 20250728_180730_120.jpg  # Time-based filenames
@@ -205,6 +255,49 @@ The script automatically adds comprehensive EXIF data to downloaded images:
 - **Optional**: Use `-q` or `--quality` parameter to specify JPEG quality (1-100)
 - **Quality 95**: Good balance between file size and quality
 - **Quality 100**: Maximum quality (larger file size)
+
+## Advanced Features
+
+### Re-downloading Failed Images
+
+The toolkit includes utilities to help you re-download failed images:
+
+```bash
+# Extract failed image IDs from logs (manual process)
+grep "Failed to download image" logs/sequence_*.log | grep -o "[0-9]\+" > failed_images.txt
+
+# Re-download failed images
+python3 sequence_downloader.py SEQUENCE_ID --image-file failed_images.txt
+```
+
+### Debugging Problematic Images
+
+Use the debug tool to analyze specific images:
+
+```bash
+# Debug a specific image
+python3 debug_mapillary_images.py IMAGE_ID
+
+# Debug multiple images
+python3 debug_mapillary_images.py IMAGE_ID1 IMAGE_ID2 IMAGE_ID3
+```
+
+### Log Analysis
+
+All downloads generate detailed logs in the `logs/` directory:
+
+- **Download progress**: Real-time status updates
+- **Error tracking**: Detailed error information for failed downloads
+- **EXIF creation status**: Success/failure of EXIF data addition
+- **Statistics**: Complete download summary with counts
+
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `-i, --images` | Space-separated list of specific image IDs to download |
+| `--image-file` | File containing image IDs (one per line) |
+| `-q, --quality` | JPEG quality (1-100). If not specified, saves original quality |
 
 ## Notes
 
