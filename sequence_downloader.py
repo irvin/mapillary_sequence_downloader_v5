@@ -93,24 +93,25 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         logger.info(f"🔍 DEBUG - Timestamp in seconds: {timestamp_sec}")
         logger.info(f"🔍 DEBUG - Unix timestamp: {int(timestamp_sec)}")
 
-        # Mapillary timestamp is in local timezone, convert to UTC for EXIF data
+        # Mapillary timestamp is in local timezone, use local time for EXIF DateTime tags
         if tz_offset != 0:
             tz = timezone(timedelta(hours=tz_offset))
-            capture_time_local = datetime.fromtimestamp(timestamp_sec, tz=tz)
-            capture_time = capture_time_local.astimezone(timezone.utc)  # Convert to UTC for EXIF
+            capture_time = datetime.fromtimestamp(timestamp_sec, tz=tz)  # Use local time for EXIF
+            capture_time_utc = capture_time.astimezone(timezone.utc)  # Keep UTC for GPS timestamp
             logger.info(f"🔍 DEBUG - Local timezone: {tz}")
-            logger.info(f"🔍 DEBUG - Local time: {capture_time_local}")
-            logger.info(f"🔍 DEBUG - UTC time: {capture_time}")
-            logger.info(f"Mapillary local time: {capture_time_local.strftime('%Y-%m-%d %H:%M:%S %Z')} -> UTC: {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            logger.info(f"🔍 DEBUG - Local time (for EXIF): {capture_time}")
+            logger.info(f"🔍 DEBUG - UTC time (for GPS): {capture_time_utc}")
+            logger.info(f"Mapillary local time: {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')} -> UTC: {capture_time_utc.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         else:
             # Assume UTC if no timezone info
             capture_time = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+            capture_time_utc = capture_time
             logger.info(f"🔍 DEBUG - Using UTC timezone (no GPS timezone inference)")
             logger.info(f"🔍 DEBUG - UTC time: {capture_time}")
             logger.info(f"Mapillary timestamp (UTC): {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
     # Convert to UTC for GPS timestamp (keep original EXIF behavior)
-    gps_time = capture_time.utctimetuple()
+    gps_time = capture_time_utc.utctimetuple()
 
     gps_ifd = {
         piexif.GPSIFD.GPSLatitudeRef: 'N' if latitude >= 0 else 'S',
@@ -118,7 +119,7 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         piexif.GPSIFD.GPSLongitudeRef: 'E' if longitude >= 0 else 'W',
         piexif.GPSIFD.GPSLongitude: [(lon_deg[0], 1), (lon_deg[1], 1), (int(lon_deg[2]*100), 100)],
         piexif.GPSIFD.GPSTimeStamp: [(gps_time.tm_hour, 1), (gps_time.tm_min, 1), (gps_time.tm_sec, 1)],
-        piexif.GPSIFD.GPSDateStamp: capture_time.strftime('%Y:%m:%d')
+        piexif.GPSIFD.GPSDateStamp: capture_time_utc.strftime('%Y:%m:%d')
     }
 
     # Add compass angle if available (using computed_compass_angle for GPSImgDirection as it's more accurate)
@@ -185,6 +186,29 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         piexif.ExifIFD.DateTimeOriginal: capture_time.strftime('%Y:%m:%d %H:%M:%S.%f')[:-3],  # Keep milliseconds
         piexif.ExifIFD.DateTimeDigitized: capture_time.strftime('%Y:%m:%d %H:%M:%S.%f')[:-3],  # Keep milliseconds
     }
+
+    # Add timezone offset information (EXIF 2.31)
+    if image_metadata and image_metadata.get('captured_at') and latitude and longitude:
+        try:
+            # Calculate timezone offset from GPS coordinates
+            tz_offset = int(longitude / 15)  # Rough timezone calculation
+            if tz_offset != 0:
+                # Format timezone offset as +HH:MM or -HH:MM
+                offset_hours = abs(tz_offset)
+                offset_str = f"{'+' if tz_offset >= 0 else '-'}{offset_hours:02d}:00"
+                logger.info(f"🔍 DEBUG - Adding timezone offset tags: {offset_str}")
+
+                # Add timezone offset tags (EXIF 2.31)
+                # Note: These tags might not be available in older piexif versions
+                try:
+                    exif_ifd[0x9010] = offset_str  # OffsetTime
+                    exif_ifd[0x9011] = offset_str  # OffsetTimeOriginal
+                    exif_ifd[0x9012] = offset_str  # OffsetTimeDigitized
+                    logger.info(f"🔍 DEBUG - Timezone offset tags added: {offset_str}")
+                except Exception as tag_error:
+                    logger.warning(f"Timezone offset tags not supported in this piexif version: {tag_error}")
+        except Exception as e:
+            logger.warning(f"Failed to add timezone offset tags: {e}")
 
     # Add camera settings if available from metadata
     if image_metadata:
