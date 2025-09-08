@@ -18,9 +18,9 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None):
+def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_metadata=None):
     """
-    Add GPS and basic EXIF data to image
+    Add comprehensive GPS and EXIF data to image
     """
     def convert_to_degrees(value):
         d = int(value)
@@ -31,40 +31,121 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None):
     lat_deg = convert_to_degrees(latitude)
     lon_deg = convert_to_degrees(longitude)
 
-    # GPS information
+    # GPS information - only use if available from metadata
+    altitude = None
+    if image_metadata and image_metadata.get('alt'):
+        altitude = int(image_metadata['alt'] * 100)
+    elif image_metadata and image_metadata.get('computed_alt'):
+        altitude = int(image_metadata['computed_alt'] * 100)
+    elif image_metadata and image_metadata.get('computed_altitude'):
+        altitude = int(image_metadata['computed_altitude'] * 100)
+
+    # Use captured_at timestamp if available
+    capture_time = datetime.now()
+    if image_metadata and image_metadata.get('captured_at'):
+        capture_time = datetime.fromtimestamp(image_metadata['captured_at'] / 1000)
+
+    # Convert to UTC for GPS timestamp
+    gps_time = capture_time.utctimetuple()
+
     gps_ifd = {
         piexif.GPSIFD.GPSLatitudeRef: 'N' if latitude >= 0 else 'S',
         piexif.GPSIFD.GPSLatitude: [(lat_deg[0], 1), (lat_deg[1], 1), (int(lat_deg[2]*100), 100)],
         piexif.GPSIFD.GPSLongitudeRef: 'E' if longitude >= 0 else 'W',
         piexif.GPSIFD.GPSLongitude: [(lon_deg[0], 1), (lon_deg[1], 1), (int(lon_deg[2]*100), 100)],
-        piexif.GPSIFD.GPSAltitudeRef: 0,  # Above sea level
-        piexif.GPSIFD.GPSAltitude: (0, 1),  # Default altitude
-        piexif.GPSIFD.GPSTimeStamp: [(0, 1), (0, 1), (0, 1)],
-        piexif.GPSIFD.GPSDateStamp: datetime.now().strftime('%Y:%m:%d')
+        piexif.GPSIFD.GPSTimeStamp: [(gps_time.tm_hour, 1), (gps_time.tm_min, 1), (gps_time.tm_sec, 1)],
+        piexif.GPSIFD.GPSDateStamp: capture_time.strftime('%Y:%m:%d')
     }
 
+    # Only add altitude information if available
+    if altitude is not None:
+        gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0  # Above sea level
+        gps_ifd[piexif.GPSIFD.GPSAltitude] = (altitude, 100)
+
     # Basic image information
+    camera_make = 'Unknown'
+    camera_model = 'Unknown'
+
+    if image_metadata:
+        camera_make = image_metadata.get('camera_make', camera_make)
+        camera_model = image_metadata.get('camera_model', camera_model)
+
+    # Get image dimensions
+    image_width = 0
+    image_height = 0
+    if image_metadata:
+        image_width = image_metadata.get('width', 0)
+        image_height = image_metadata.get('height', 0)
+
+    # Determine image orientation based on dimensions
+    # 1 = normal, 3 = 180°, 6 = 90° clockwise, 8 = 90° counter-clockwise
+    orientation = 1  # default normal orientation
+    if image_width > 0 and image_height > 0:
+        if image_width > image_height:
+            orientation = 1  # landscape
+        else:
+            orientation = 6  # portrait (90° clockwise)
+
+    # Use standard DPI for digital images (72 DPI is the standard for digital cameras)
+    dpi = 72
+
     zeroth_ifd = {
-        piexif.ImageIFD.Make: 'Mapillary',
-        piexif.ImageIFD.Model: 'Street View Camera',
+        piexif.ImageIFD.Make: camera_make,
+        piexif.ImageIFD.Model: camera_model,
         piexif.ImageIFD.Software: 'Mapillary Sequence Downloader v4',
-        piexif.ImageIFD.DateTime: datetime.now().strftime('%Y:%m:%d %H:%M:%S'),
-        piexif.ImageIFD.XResolution: (72, 1),
-        piexif.ImageIFD.YResolution: (72, 1),
-        piexif.ImageIFD.ResolutionUnit: 2,
-        piexif.ImageIFD.Orientation: 1,
+        piexif.ImageIFD.DateTime: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
+        piexif.ImageIFD.XResolution: (dpi, 1),
+        piexif.ImageIFD.YResolution: (dpi, 1),
+        piexif.ImageIFD.ResolutionUnit: 2,  # Inches
+        piexif.ImageIFD.Orientation: orientation,
     }
 
     # Camera information
     exif_ifd = {
-        piexif.ExifIFD.DateTimeOriginal: datetime.now().strftime('%Y:%m:%d %H:%M:%S'),
-        piexif.ExifIFD.DateTimeDigitized: datetime.now().strftime('%Y:%m:%d %H:%M:%S'),
+        piexif.ExifIFD.DateTimeOriginal: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
+        piexif.ExifIFD.DateTimeDigitized: capture_time.strftime('%Y:%m:%d %H:%M:%S'),
     }
 
-    # Add Mapillary specific information to UserComment
+    # Add camera settings if available from metadata
+    if image_metadata:
+        # Add focal length if available
+        if image_metadata.get('focal_length'):
+            exif_ifd[piexif.ExifIFD.FocalLength] = (int(image_metadata['focal_length'] * 100), 100)
+
+        # Add ISO if available
+        if image_metadata.get('iso'):
+            exif_ifd[piexif.ExifIFD.ISOSpeedRatings] = image_metadata['iso']
+
+        # Add exposure time if available
+        if image_metadata.get('exposure_time'):
+            exif_ifd[piexif.ExifIFD.ExposureTime] = (int(image_metadata['exposure_time'] * 1000000), 1000000)
+
+        # Add aperture if available
+        if image_metadata.get('aperture'):
+            exif_ifd[piexif.ExifIFD.FNumber] = (int(image_metadata['aperture'] * 100), 100)
+
+    # Add image dimensions if available
+    if image_width > 0 and image_height > 0:
+        exif_ifd[piexif.ExifIFD.PixelXDimension] = image_width
+        exif_ifd[piexif.ExifIFD.PixelYDimension] = image_height
+        # Also add to zeroth IFD for better compatibility
+        zeroth_ifd[piexif.ImageIFD.ImageWidth] = image_width
+        zeroth_ifd[piexif.ImageIFD.ImageLength] = image_height
+
+    # Add comprehensive Mapillary information to UserComment
     mapillary_info = f"Mapillary Image ID: {image_id}"
     if sequence_id:
         mapillary_info += f" | Sequence: {sequence_id}"
+    if image_metadata and image_metadata.get('creator_username'):
+        mapillary_info += f" | Creator: {image_metadata['creator_username']}"
+    if image_metadata and image_metadata.get('camera_type'):
+        mapillary_info += f" | Camera Type: {image_metadata['camera_type']}"
+    if image_metadata and image_metadata.get('compass_angle'):
+        mapillary_info += f" | Compass: {image_metadata['compass_angle']}°"
+    if image_metadata and image_metadata.get('computed_compass_angle'):
+        mapillary_info += f" | Computed Compass: {image_metadata['computed_compass_angle']}°"
+    if image_metadata and image_metadata.get('computed_altitude'):
+        mapillary_info += f" | Computed Alt: {image_metadata['computed_altitude']}m"
     mapillary_info += f" | Downloaded: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
     exif_ifd[piexif.ExifIFD.UserComment] = mapillary_info.encode('utf-8')
@@ -126,8 +207,10 @@ def main():
         try:
             logger.info(f"Processing image {i}/{len(image_ids)}: {img_id['id']}")
 
-            # Get basic image information
-            fields = ['thumb_original_url', 'geometry']
+            # Get basic image information with minimal fields to avoid 500 errors
+            fields = [
+                'thumb_original_url', 'geometry', 'captured_at', 'compass_angle', 'camera_type', 'computed_altitude', 'computed_compass_angle', 'sequence'
+            ]
             image_url = f"https://graph.mapillary.com/{img_id['id']}?fields={','.join(fields)}"
             img_r = requests.get(image_url, headers=header, timeout=30)
             img_r.raise_for_status()
@@ -146,12 +229,21 @@ def main():
             # Process image and add EXIF data
             image = Image.open(BytesIO(image_data))
 
-            # Add GPS EXIF data
+            # Get actual image dimensions from the downloaded image
+            actual_width, actual_height = image.size
+            logger.info(f"Image dimensions: {actual_width}x{actual_height}")
+
+            # Update image metadata with actual dimensions
+            img_data['width'] = actual_width
+            img_data['height'] = actual_height
+
+            # Add comprehensive GPS EXIF data
             exif_bytes = add_gps_exif_data(
                 img_data['geometry']['coordinates'][1],  # latitude
                 img_data['geometry']['coordinates'][0],  # longitude
                 img_id['id'],
-                sequence_id
+                sequence_id,
+                img_data  # Pass all image metadata
             )
 
             # Save image
