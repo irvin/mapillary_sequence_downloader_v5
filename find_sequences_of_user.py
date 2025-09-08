@@ -13,16 +13,18 @@ from config import access_token
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_all_user_sequences(username, max_pages=None):
-    """Get all sequences for specified user"""
+def get_all_user_sequences(username, max_pages=None, camera_type_filter=None):
+    """Get all sequences for specified user with optional camera type filtering"""
     header = {'Authorization': f'OAuth {access_token}'}
     sequences = set()
     all_images = []
 
     logger.info(f"Starting search for all sequences of user {username}...")
+    if camera_type_filter:
+        logger.info(f"Filtering for camera type: {camera_type_filter}")
 
-    # First page
-    url = f'https://graph.mapillary.com/images?fields=id,sequence,creator,created_at&creator_username={username}&limit=100'
+    # First page - include camera_type in fields
+    url = f'https://graph.mapillary.com/images?fields=id,sequence,creator,created_at,camera_type&creator_username={username}&limit=100'
 
     page = 1
     while url and (max_pages is None or page <= max_pages):
@@ -36,8 +38,14 @@ def get_all_user_sequences(username, max_pages=None):
             images = data.get('data', [])
             logger.info(f"Found {len(images)} images")
 
-            # Extract sequences
+            # Extract sequences with optional camera type filtering
             for img in images:
+                # Apply camera type filter if specified
+                if camera_type_filter:
+                    img_camera_type = img.get('camera_type', '')
+                    if camera_type_filter.lower() not in img_camera_type.lower():
+                        continue
+
                 all_images.append(img)
                 if 'sequence' in img and img['sequence']:
                     sequences.add(img['sequence'])
@@ -121,32 +129,70 @@ def save_sequences_to_file(sequences, username, filename=None):
 
 def main():
     """Main program"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Find all sequences for a Mapillary user')
+    parser.add_argument('username', nargs='?', help='Username to search for')
+    parser.add_argument('-p', '--max-pages', type=int, help='Maximum number of pages to search')
+    parser.add_argument('-f', '--filter', choices=['all', '360', 'regular'],
+                       default='all', help='Filter by camera type (360=spherical, regular=perspective)')
+
+    args = parser.parse_args()
+
     print("=== Mapillary User Sequences Finder ===")
     print("Search for all sequences of a user using creator_username")
     print()
 
     # Get username
-    username = input("Enter username to search: ").strip()
-    if not username:
-        print("Username cannot be empty")
-        return
+    if args.username:
+        username = args.username
+    else:
+        username = input("Enter username to search: ").strip()
+        if not username:
+            print("Username cannot be empty")
+            return
 
-    # Ask about page limit
-    max_pages_input = input("Maximum search pages (leave empty to search all): ").strip()
-    max_pages = None
-    if max_pages_input:
-        try:
-            max_pages = int(max_pages_input)
-        except ValueError:
-            print("Invalid page number, will search all pages")
+    # Get page limit
+    max_pages = args.max_pages
+    if max_pages is None:
+        max_pages_input = input("Maximum search pages (leave empty to search all): ").strip()
+        if max_pages_input:
+            try:
+                max_pages = int(max_pages_input)
+            except ValueError:
+                print("Invalid page number, will search all pages")
+                max_pages = None
+
+    # Get camera type filter
+    camera_type_filter = None
+    if args.filter == '360':
+        camera_type_filter = "spherical"
+    elif args.filter == 'regular':
+        camera_type_filter = "perspective"
+
+    # Interactive filter selection if not specified via command line
+    if camera_type_filter is None and args.filter == 'all':
+        print("\nCamera type filter options:")
+        print("1. All photos (default)")
+        print("2. 360 photos only")
+        print("3. Regular photos only")
+
+        filter_choice = input("Choose filter (1-3, default=1): ").strip()
+
+        if filter_choice == "2":
+            camera_type_filter = "spherical"
+        elif filter_choice == "3":
+            camera_type_filter = "perspective"
 
     print(f"\nStarting search for sequences of user '{username}'...")
     if max_pages:
         print(f"Maximum {max_pages} pages")
+    if camera_type_filter:
+        print(f"Filtering for camera type: {camera_type_filter}")
     print()
 
     # Search sequences
-    sequences, images = get_all_user_sequences(username, max_pages)
+    sequences, images = get_all_user_sequences(username, max_pages, camera_type_filter)
 
     if not sequences:
         print("No sequences found")

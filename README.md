@@ -69,12 +69,38 @@ python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0 -q 95
 ### 2. Find All Sequences for a User
 
 ```bash
-python3 find_sequences_of_user.py
+python3 find_sequences_of_user.py [username] [-p MAX_PAGES] [-f FILTER]
 ```
+
+**Examples:**
+
+```bash
+# Interactive mode - all photos
+python3 find_sequences_of_user.py
+
+# Search specific user - all photos
+python3 find_sequences_of_user.py irvinfly
+
+# Search only 360 photos
+python3 find_sequences_of_user.py irvinfly -f 360
+
+# Search only regular photos
+python3 find_sequences_of_user.py irvinfly -f regular
+
+# Limit search to 5 pages
+python3 find_sequences_of_user.py irvinfly -f 360 -p 5
+```
+
+**Filter Options:**
+
+- `all` - All photos (default)
+- `360` - 360° photos only (camera_type: "spherical")
+- `regular` - Regular photos only (camera_type: "perspective")
 
 This will:
 
 - Search for all sequences belonging to a specific username
+- Filter by camera type (360 or regular)
 - Display detailed analysis of each sequence
 - Save sequence IDs to a text file for batch processing
 
@@ -97,11 +123,20 @@ python3 batch_downloader.py sequences_irvinfly.txt -q 95
 ### 4. Complete Workflow
 
 ```bash
-# 1. Find all sequences for a user
-python3 find_sequences_of_user.py
+# 1. Find all sequences for a user (all photos)
+python3 find_sequences_of_user.py irvinfly
 
-# 2. Batch download all found sequences
+# 2. Find only 360° sequences
+python3 find_sequences_of_user.py irvinfly -f 360
+
+# 3. Find only regular photo sequences
+python3 find_sequences_of_user.py irvinfly -f regular
+
+# 4. Batch download all found sequences
 python3 batch_downloader.py sequences_irvinfly.txt
+
+# 5. Batch download with specific quality
+python3 batch_downloader.py sequences_irvinfly.txt -q 95
 ```
 
 ## File Structure
