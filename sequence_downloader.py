@@ -26,11 +26,11 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     # GPS information - only use if available from metadata
     altitude = None
     if image_metadata and image_metadata.get('alt'):
-        altitude = int(image_metadata['alt'] * 100)
+        altitude = max(0, int(image_metadata['alt'] * 100))  # 確保非負數
     elif image_metadata and image_metadata.get('computed_alt'):
-        altitude = int(image_metadata['computed_alt'] * 100)
+        altitude = max(0, int(image_metadata['computed_alt'] * 100))  # 確保非負數
     elif image_metadata and image_metadata.get('computed_altitude'):
-        altitude = int(image_metadata['computed_altitude'] * 100)
+        altitude = max(0, int(image_metadata['computed_altitude'] * 100))  # 確保非負數
 
     # Use captured_at timestamp if available
     capture_time = datetime.now()
