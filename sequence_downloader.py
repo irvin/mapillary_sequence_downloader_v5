@@ -3,7 +3,7 @@ from PIL import Image
 import piexif
 from io import BytesIO
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import logging
 
 # Setup logging
@@ -41,6 +41,7 @@ def setup_logging(sequence_id):
 
 logger = None  # Will be initialized in main function
 
+
 def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_metadata=None):
     """
     Add comprehensive GPS and EXIF data to image
@@ -65,8 +66,32 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
 
     # Use captured_at timestamp if available
     capture_time = datetime.now()
+
     if image_metadata and image_metadata.get('captured_at'):
-        capture_time = datetime.fromtimestamp(image_metadata['captured_at'] / 1000)
+        # Try to infer timezone from GPS coordinates
+        if latitude and longitude:
+            try:
+                # Simple timezone inference based on longitude
+                # This is a rough approximation - in practice you'd use a proper timezone library
+                tz_offset = int(longitude / 15)  # Rough timezone calculation
+                logger.info(f"Inferred timezone offset from GPS: UTC{tz_offset:+d}")
+            except:
+                tz_offset = 0
+                logger.warning("Could not infer timezone from GPS, using UTC")
+        else:
+            tz_offset = 0
+            logger.warning("No GPS coordinates available, using UTC")
+
+        # Mapillary timestamp is in local timezone, convert to UTC
+        if tz_offset != 0:
+            tz = timezone(timedelta(hours=tz_offset))
+            capture_time_local = datetime.fromtimestamp(image_metadata['captured_at'] / 1000, tz=tz)
+            capture_time = capture_time_local.astimezone(timezone.utc)  # Convert to UTC
+            logger.info(f"Mapillary local time: {capture_time_local.strftime('%Y-%m-%d %H:%M:%S %Z')} -> UTC: {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        else:
+            # Assume UTC if no timezone info
+            capture_time = datetime.fromtimestamp(image_metadata['captured_at'] / 1000, tz=timezone.utc)
+            logger.info(f"Mapillary timestamp (UTC): {capture_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
     # Convert to UTC for GPS timestamp
     gps_time = capture_time.utctimetuple()
@@ -335,8 +360,24 @@ def main(sequence_id, quality=None, specific_images=None):
             # Set output directory name based on first image's timestamp
             if output_dir is None:
                 if 'captured_at' in img_data and img_data['captured_at']:
+                    # Determine timezone offset from GPS coordinates
+                    tz_offset = 0
+                    if 'computed_geometry' in img_data and img_data['computed_geometry']:
+                        # Try to infer from GPS coordinates
+                        coords = img_data['computed_geometry']['coordinates']
+                        if coords and len(coords) >= 2:
+                            longitude = coords[0]
+                            tz_offset = int(longitude / 15)  # Rough timezone calculation
+
+                    # Mapillary timestamp is in local timezone, convert to UTC
                     timestamp_sec = img_data['captured_at'] / 1000.0
-                    first_image_timestamp = datetime.fromtimestamp(timestamp_sec)
+                    if tz_offset != 0:
+                        tz = timezone(timedelta(hours=tz_offset))
+                        first_image_timestamp_local = datetime.fromtimestamp(timestamp_sec, tz=tz)
+                        first_image_timestamp = first_image_timestamp_local.astimezone(timezone.utc)
+                    else:
+                        first_image_timestamp = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+
                     # Create folder name with date and time
                     folder_name = f"{first_image_timestamp.strftime('%Y%m%d_%H%M%S')}_{sequence_id[:8]}"
                 else:
@@ -393,8 +434,24 @@ def main(sequence_id, quality=None, specific_images=None):
 
             # Generate filename based on capture time
             if 'captured_at' in img_data and img_data['captured_at']:
+                # Determine timezone offset from GPS coordinates
+                tz_offset = 0
+                if 'computed_geometry' in img_data and img_data['computed_geometry']:
+                    # Try to infer from GPS coordinates
+                    coords = img_data['computed_geometry']['coordinates']
+                    if coords and len(coords) >= 2:
+                        longitude = coords[0]
+                        tz_offset = int(longitude / 15)  # Rough timezone calculation
+
+                # Mapillary timestamp is in local timezone, convert to UTC
                 timestamp_sec = img_data['captured_at'] / 1000.0
-                capture_time = datetime.fromtimestamp(timestamp_sec)
+                if tz_offset != 0:
+                    tz = timezone(timedelta(hours=tz_offset))
+                    capture_time_local = datetime.fromtimestamp(timestamp_sec, tz=tz)
+                    capture_time = capture_time_local.astimezone(timezone.utc)
+                else:
+                    capture_time = datetime.fromtimestamp(timestamp_sec, tz=timezone.utc)
+
                 filename = f"{capture_time.strftime('%Y%m%d_%H%M%S')}_{capture_time.strftime('%f')[:3]}.jpg"
             else:
                 filename = f"{img_id['id']}.jpg"
