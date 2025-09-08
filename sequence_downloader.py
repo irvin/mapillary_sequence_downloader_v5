@@ -247,6 +247,10 @@ def main(sequence_id):
         logger.error(f"Failed to get image list: {e}")
         return
 
+    # Determine output directory name based on first image's timestamp
+    output_dir = None
+    first_image_timestamp = None
+
     # Process each image and download
     for i, img_id in enumerate(image_ids, 1):
         try:
@@ -263,15 +267,25 @@ def main(sequence_id):
             img_r.raise_for_status()
             img_data = img_r.json()
 
+            # Set output directory name based on first image's timestamp
+            if output_dir is None:
+                if 'captured_at' in img_data and img_data['captured_at']:
+                    timestamp_sec = img_data['captured_at'] / 1000.0
+                    first_image_timestamp = datetime.fromtimestamp(timestamp_sec)
+                    # Create folder name with date and time
+                    folder_name = f"{first_image_timestamp.strftime('%Y%m%d_%H%M%S')}_{sequence_id[:8]}"
+                else:
+                    # Fallback to sequence ID if no timestamp
+                    folder_name = sequence_id
+                output_dir = f"downloads/{folder_name}"
+                if not os.path.exists(output_dir):
+                    os.makedirs(output_dir)
+                    logger.info(f"Created output directory: {output_dir}")
+
             # Download image
             image_get_url = img_data['thumb_original_url']
             logger.info(f"Downloading image...")
             image_data = download_image_with_retry(image_get_url)
-
-            # Create output directory
-            output_dir = f"downloads/{sequence_id}"
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
 
             # Process image and add EXIF data
             image = Image.open(BytesIO(image_data))
@@ -328,4 +342,9 @@ def main(sequence_id):
     logger.info("🎉 Download completed!")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python3 sequence_downloader.py <sequence_id>")
+        print("Example: python3 sequence_downloader.py 3NpXMDuHm9IZQ1vBW6q4T0")
+        sys.exit(1)
+    main(sys.argv[1])
