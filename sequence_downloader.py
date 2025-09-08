@@ -7,8 +7,39 @@ from datetime import datetime
 import logging
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+def setup_logging(sequence_id):
+    """Setup logging to both console and file"""
+    # Create logs directory
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+
+    # Generate log filename
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = f"logs/sequence_{sequence_id}_{timestamp}.log"
+
+    # Setup log format
+    log_format = '%(asctime)s - %(levelname)s - %(message)s'
+
+    # Clear existing handlers
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_format,
+        handlers=[
+            logging.FileHandler(log_filename, encoding='utf-8'),
+            logging.StreamHandler()  # Also output to console
+        ]
+    )
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting download for sequence {sequence_id}")
+    logger.info(f"Log file: {log_filename}")
+    return logger, log_filename
+
+logger = None  # Will be initialized in main function
 
 def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_metadata=None):
     """
@@ -26,11 +57,11 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     # GPS information - only use if available from metadata
     altitude = None
     if image_metadata and image_metadata.get('alt'):
-        altitude = max(0, int(image_metadata['alt'] * 100))  # 確保非負數
+        altitude = max(0, int(image_metadata['alt'] * 100))  # Ensure non-negative
     elif image_metadata and image_metadata.get('computed_alt'):
-        altitude = max(0, int(image_metadata['computed_alt'] * 100))  # 確保非負數
+        altitude = max(0, int(image_metadata['computed_alt'] * 100))  # Ensure non-negative
     elif image_metadata and image_metadata.get('computed_altitude'):
-        altitude = max(0, int(image_metadata['computed_altitude'] * 100))  # 確保非負數
+        altitude = max(0, int(image_metadata['computed_altitude'] * 100))  # Ensure non-negative
 
     # Use captured_at timestamp if available
     capture_time = datetime.now()
@@ -185,7 +216,22 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         exif_bytes = piexif.dump(exif_dict)
         return exif_bytes
     except Exception as e:
-        logger.warning(f"Failed to create EXIF data: {e}")
+        # Record detailed error information
+        error_details = {
+            'error_type': type(e).__name__,
+            'error_message': str(e),
+            'latitude': latitude,
+            'longitude': longitude,
+            'altitude': altitude,
+            'image_id': image_id,
+            'exif_dict_keys': list(exif_dict.keys()),
+            'gps_ifd_size': len(gps_ifd),
+            'zeroth_ifd_size': len(zeroth_ifd),
+            'exif_ifd_size': len(exif_ifd)
+        }
+
+        logger.warning(f"Failed to create EXIF data for image {image_id}: {e}")
+        logger.debug(f"Error details: {error_details}")
         return None
 
 
@@ -205,14 +251,20 @@ def download_image_with_retry(url, max_retries=3):
             else:
                 raise e
 
-def main(sequence_id, quality=None):
+def main(sequence_id, quality=None, specific_images=None):
     """
-    Main function to download all images in a sequence
+    Main function to download all images in a sequence or specific images
 
     Args:
         sequence_id (str): Sequence ID to download
         quality (int, optional): JPEG quality (1-100). If None, saves original quality
+        specific_images (list, optional): List of specific image IDs to download. If None, downloads all images
     """
+    global logger
+
+    # Setup logging
+    logger, log_filename = setup_logging(sequence_id)
+
     # Get access_token from config file
     try:
         from config import access_token
@@ -233,24 +285,36 @@ def main(sequence_id, quality=None):
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
 
-    # Get all image IDs in the sequence
-    logger.info(f"Getting image list for sequence {sequence_id}...")
-    url = f"https://graph.mapillary.com/image_ids?sequence_id={sequence_id}"
+    # Set up common header for API requests
     header = {'Authorization': f'OAuth {access_token}'}
 
-    try:
-        r = requests.get(url, headers=header, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        image_ids = data.get("data", [])
-        logger.info(f"Found {len(image_ids)} images")
-    except Exception as e:
-        logger.error(f"Failed to get image list: {e}")
-        return
+    # Get image IDs - either all images in sequence or specific images
+    if specific_images:
+        logger.info(f"Using specific images list: {len(specific_images)} images")
+        image_ids = [{'id': img_id} for img_id in specific_images]
+    else:
+        logger.info(f"Getting image list for sequence {sequence_id}...")
+        url = f"https://graph.mapillary.com/image_ids?sequence_id={sequence_id}"
+
+        try:
+            r = requests.get(url, headers=header, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            image_ids = data.get("data", [])
+            logger.info(f"Found {len(image_ids)} images")
+        except Exception as e:
+            logger.error(f"Failed to get image list: {e}")
+            return
 
     # Determine output directory name based on first image's timestamp
     output_dir = None
     first_image_timestamp = None
+
+    # Initialize error statistics
+    error_count = 0
+    error_images = []
+    exif_error_count = 0
+    exif_error_images = []
 
     # Process each image and download
     for i, img_id in enumerate(image_ids, 1):
@@ -316,6 +380,17 @@ def main(sequence_id, quality=None):
                 img_data  # Pass all image metadata
             )
 
+            # Check if EXIF creation was successful
+            if exif_bytes is None:
+                exif_error_count += 1
+                exif_error_images.append({
+                    'image_id': img_id['id'],
+                    'error_type': 'EXIF creation failed',
+                    'coordinates': coords,
+                    'metadata_keys': list(img_data.keys())
+                })
+                logger.warning(f"⚠️  EXIF creation failed for image {img_id['id']}")
+
             # Generate filename based on capture time
             if 'captured_at' in img_data and img_data['captured_at']:
                 timestamp_sec = img_data['captured_at'] / 1000.0
@@ -345,10 +420,39 @@ def main(sequence_id, quality=None):
             time.sleep(0.5)
 
         except Exception as e:
+            error_count += 1
+            error_images.append({
+                'image_id': img_id['id'],
+                'error_type': type(e).__name__,
+                'error_message': str(e),
+                'image_index': i
+            })
             logger.error(f"❌ Error processing image {img_id['id']}: {e}")
             continue
 
+    # Output error statistics
+    logger.info("=" * 80)
+    logger.info("📊 Download Statistics")
+    logger.info(f"Total images: {len(image_ids)}")
+    logger.info(f"Successfully downloaded: {len(image_ids) - error_count}")
+    logger.info(f"Download failed: {error_count}")
+    logger.info(f"EXIF creation failed: {exif_error_count}")
+
+    if error_images:
+        logger.info("\n❌ Failed downloads:")
+        for error in error_images:
+            logger.info(f"  - Image {error['image_index']}: {error['image_id']} ({error['error_type']}: {error['error_message']})")
+
+    if exif_error_images:
+        logger.info("\n⚠️  EXIF creation failed:")
+        for error in exif_error_images:
+            logger.info(f"  - {error['image_id']} (coordinates: {error['coordinates']})")
+
     logger.info("🎉 Download completed!")
+    logger.info(f"📄 Detailed log saved to: {log_filename}")
+
+    # Output log file path to console
+    print(f"\n📄 Detailed log saved to: {log_filename}")
 
 if __name__ == "__main__":
     import sys
@@ -356,8 +460,32 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Download Mapillary sequence images with EXIF data')
     parser.add_argument('sequence_id', help='Sequence ID to download')
-    parser.add_argument('-q', '--quality', type=int, choices=range(1, 101),
+    parser.add_argument('-q', '--quality', type=int,
                        help='JPEG quality (1-100). If not specified, saves original quality')
+    parser.add_argument('-i', '--images', nargs='+',
+                       help='Specific image IDs to download (space-separated)')
+    parser.add_argument('--image-file',
+                       help='File containing image IDs (one per line)')
 
     args = parser.parse_args()
-    main(args.sequence_id, args.quality)
+
+    # Validate quality parameter
+    if args.quality is not None and (args.quality < 1 or args.quality > 100):
+        print(f"❌ Quality parameter must be between 1-100, current value: {args.quality}")
+        sys.exit(1)
+
+    # Handle specific images
+    specific_images = None
+    if args.images:
+        specific_images = args.images
+        print(f"📋 Will download specific images: {len(specific_images)} images")
+    elif args.image_file:
+        try:
+            with open(args.image_file, 'r') as f:
+                specific_images = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            print(f"📋 Reading image list from file: {len(specific_images)} images")
+        except FileNotFoundError:
+            print(f"❌ File not found: {args.image_file}")
+            sys.exit(1)
+
+    main(args.sequence_id, args.quality, specific_images)
