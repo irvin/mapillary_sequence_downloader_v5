@@ -55,14 +55,11 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
     lat_deg = convert_to_degrees(abs(latitude))
     lon_deg = convert_to_degrees(abs(longitude))
 
-    # GPS information - only use if available from metadata
+    # GPS information - only use original data, avoid computed values
     altitude = None
+    # Only use original alt, remove all computed_* altitude fields
     if image_metadata and image_metadata.get('alt'):
         altitude = max(0, int(image_metadata['alt'] * 100))  # Ensure non-negative
-    elif image_metadata and image_metadata.get('computed_alt'):
-        altitude = max(0, int(image_metadata['computed_alt'] * 100))  # Ensure non-negative
-    elif image_metadata and image_metadata.get('computed_altitude'):
-        altitude = max(0, int(image_metadata['computed_altitude'] * 100))  # Ensure non-negative
 
     # Use captured_at timestamp if available
     capture_time = datetime.now()
@@ -122,10 +119,10 @@ def add_gps_exif_data(latitude, longitude, image_id, sequence_id=None, image_met
         piexif.GPSIFD.GPSDateStamp: capture_time_utc.strftime('%Y:%m:%d')
     }
 
-    # Add compass angle if available (using computed_compass_angle for GPSImgDirection as it's more accurate)
-    if image_metadata and image_metadata.get('computed_compass_angle'):
-        computed_compass_angle = image_metadata['computed_compass_angle']
-        gps_ifd[piexif.GPSIFD.GPSImgDirection] = (int(computed_compass_angle * 100), 100)
+    # Only use original compass angle, avoid computed values
+    if image_metadata and image_metadata.get('compass_angle'):
+        compass_angle = image_metadata['compass_angle']
+        gps_ifd[piexif.GPSIFD.GPSImgDirection] = (int(compass_angle * 100), 100)
         gps_ifd[piexif.GPSIFD.GPSImgDirectionRef] = 'T'  # True direction
 
     # Add original compass angle as additional info (not used for main direction)
@@ -452,13 +449,13 @@ def main(sequence_id, quality=None, specific_images=None):
             img_data['width'] = actual_width
             img_data['height'] = actual_height
 
-            # Use computed_geometry if available (more accurate), otherwise use geometry
-            if 'computed_geometry' in img_data and img_data['computed_geometry']:
-                coords = img_data['computed_geometry']['coordinates']
-                logger.info("Using computed_geometry for more accurate GPS coordinates")
-            else:
+            # Force use original geometry coordinates, avoid computed drift issues
+            if 'geometry' in img_data and img_data['geometry']:
                 coords = img_data['geometry']['coordinates']
-                logger.info("Using standard geometry for GPS coordinates")
+                logger.info("Using original geometry coordinates (avoiding computed drift)")
+            else:
+                logger.error("❌ No available original coordinate information")
+                continue
 
             # Add comprehensive GPS EXIF data
             exif_bytes = add_gps_exif_data(
