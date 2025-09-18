@@ -95,10 +95,6 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
     current_sequences = set()  # Track sequences for current date
     total_sequences = 0  # Count total sequences found
 
-    logger.info(f"Starting search for all sequences of user {username}...")
-    if camera_type_filter:
-        logger.info(f"Filtering for camera type: {camera_type_filter}")
-
     # First page - include camera_type in fields
     url = f'https://graph.mapillary.com/images?fields=id,sequence,creator,created_at,camera_type,captured_at&creator_username={username}&limit=100'
 
@@ -207,7 +203,6 @@ def main():
     args = parser.parse_args()
 
     logger.info("=== Mapillary User Sequences Finder ===")
-    logger.info("Search for all sequences of a user using creator_username")
     logger.info("")
 
     # Get username
@@ -219,16 +214,8 @@ def main():
             print("Username cannot be empty")
             return
 
-    # Get page limit
+    # Get page limit (None means search all pages)
     max_pages = args.max_pages
-    if max_pages is None:
-        max_pages_input = input("Maximum search pages (leave empty to search all): ").strip()
-        if max_pages_input:
-            try:
-                max_pages = int(max_pages_input)
-            except ValueError:
-                print("Invalid page number, will search all pages")
-                max_pages = None
 
     # Get camera type filter
     camera_type_filter = None
@@ -242,7 +229,6 @@ def main():
         logger.info(f"Maximum {max_pages} pages")
     if camera_type_filter:
         logger.info(f"Filtering for camera type: {camera_type_filter}")
-    logger.info("")
 
     # Prepare output file
     output_file = f"sequences_{username}.txt"
@@ -253,6 +239,7 @@ def main():
         return
 
     logger.info(f"📝 Output file prepared: {output_file}")
+    logger.info("")
 
     # Search sequences with real-time file writing
     total_sequences, sequence_timestamps = get_all_user_sequences(
