@@ -1,27 +1,99 @@
 #!/usr/bin/env python3
 """
-Get All Sequences for a User
-Search for all sequences of a user using creator_username
+Mapillary User Sequences Finder
+
+Features:
+- Search for all Mapillary sequences of a specified user
+- Support camera type filtering (perspective photos or 360-degree spherical photos)
+- Group sequences by date and write to file in real-time
+
+Writing Logic:
+1. Record the first found date and its sequences
+2. Continue recording sequences for the current date
+3. When a new date is discovered:
+   a. Write the currently recorded data
+   b. Clear the recorded data
+   c. Start recording the new date and its sequences
+4. If search is completed, write the currently recorded data
+5. If search is not completed, return to step 2
+
+Output Format:
+- File header contains search parameters (user, time, page limit, camera type filter)
+- Sequences grouped by date, sorted by timestamp within each date (newest first)
+- Each date block separated by empty lines
+
+Usage:
+python3 find_sequences_of_user.py <username> [-p <max_pages>] [-f <filter>]
+
+Parameters:
+- username: Mapillary username to search for
+- -p, --max-pages: Maximum number of pages to search (optional, search all if not specified)
+- -f, --filter: Camera type filter (all/360/regular, default is all)
+  - all: Search all types
+  - 360: Search only 360-degree photos (spherical)
+  - regular: Search only perspective photos
+
+Examples:
+python3 find_sequences_of_user.py username -p 50 -f regular
+python3 find_sequences_of_user.py username -f 360
 """
 
 import requests
 import time
 import logging
 from datetime import datetime
-from collections import defaultdict
 from config import access_token
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+
+def write_file_header(filename, username, max_pages, camera_type_filter):
+    """Write file header with search parameters"""
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(f"# Search Mapillary Sequences by User\n")
+            f.write(f"# User: {username}\n")
+            f.write(f"# Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"# Max Pages: {max_pages if max_pages else 'All'}\n")
+            f.write(f"# Image Type Filter: {camera_type_filter if camera_type_filter else 'All'}\n\n")
+        return True
+    except Exception as e:
+        logger.error(f"Error writing file header: {e}")
+        return False
+
+def write_sequences_for_date(date, sequences, sequence_timestamps, filename):
+    """Write sequences for a single date to file"""
+    try:
+        with open(filename, 'a', encoding='utf-8') as f:
+            f.write(f"# {date}\n")
+
+            # Sort sequences by timestamp (newest first)
+            if sequence_timestamps:
+                sorted_sequences = sorted(sequences,
+                                        key=lambda seq: sequence_timestamps.get(seq, 0),
+                                        reverse=True)
+            else:
+                sorted_sequences = sorted(sequences)
+
+            for seq in sorted_sequences:
+                f.write(f"{seq}\n")
+            f.write("\n")  # Add empty line after date
+
+        logger.info(f"✅ Written date {date} with {len(sequences)} sequences")
+        return True
+    except Exception as e:
+        logger.error(f"Error writing date {date} to file: {e}")
+        return False
+
 def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, output_file=None):
     """Get all sequences for specified user with optional camera type filtering"""
     header = {'Authorization': f'OAuth {access_token}'}
-    sequences = set()
-    all_images = []
-    new_sequences = set()  # Track new sequences found in current page
-    sequences_by_date = defaultdict(set)  # Group sequences by date
+    sequence_timestamps = {}  # Store timestamp for each sequence
+    current_date = None  # Track current date being processed
+    current_sequences = set()  # Track sequences for current date
+    total_sequences = 0  # Count total sequences found
 
     logger.info(f"Starting search for all sequences of user {username}...")
     if camera_type_filter:
@@ -42,10 +114,8 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
             images = data.get('data', [])
             logger.info(f"Found {len(images)} images")
 
-            # Reset new sequences for this page
-            new_sequences.clear()
 
-            # Extract sequences with optional camera type filtering
+            # Process sequences for current page
             for img in images:
                 # Apply camera type filter if specified
                 if camera_type_filter:
@@ -53,15 +123,10 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
                     if camera_type_filter.lower() not in img_camera_type.lower():
                         continue
 
-                all_images.append(img)
                 if 'sequence' in img and img['sequence']:
                     seq_id = img['sequence']
-                    if seq_id not in sequences:
-                        sequences.add(seq_id)
-                        new_sequences.add(seq_id)
 
-                    # Group sequence by date
-                    # Try captured_at first, then created_at
+                    # Group sequence by date and store timestamp
                     timestamp = None
                     if 'captured_at' in img and img['captured_at']:
                         timestamp = img['captured_at']
@@ -69,13 +134,37 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
                         timestamp = img['created_at']
 
                     if timestamp:
+                        # Store the latest timestamp for this sequence
+                        if seq_id not in sequence_timestamps or timestamp > sequence_timestamps[seq_id]:
+                            sequence_timestamps[seq_id] = timestamp
+
                         # Convert timestamp to date string (YYYYMMDD format)
                         img_date = datetime.fromtimestamp(timestamp / 1000).strftime('%Y%m%d')
-                        sequences_by_date[img_date].add(seq_id)
 
-            # Log new sequences found
-            if new_sequences:
-                logger.info(f"Found {len(new_sequences)} new sequences in page {page}")
+                        # 1. Record the first found date
+                        if current_date is None:
+                            current_date = img_date
+                            current_sequences = set()
+
+                        # 2. Continue recording sequences for the current date
+                        if img_date == current_date:
+                            current_sequences.add(seq_id)
+                        # 3. When a new date is discovered
+                        elif img_date != current_date:
+                            # a. Write the currently recorded data
+                            if output_file and current_date and current_sequences:
+                                write_sequences_for_date(
+                                    current_date,
+                                    current_sequences,
+                                    sequence_timestamps,
+                                    output_file
+                                )
+                                total_sequences += len(current_sequences)
+
+                            # b. Clear the recorded data
+                            # c. Start recording the new date and its sequences
+                            current_date = img_date
+                            current_sequences = {seq_id}
 
             # Check if there's a next page
             if 'paging' in data and 'next' in data['paging']:
@@ -90,77 +179,19 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
             logger.error(f"Error fetching page {page}: {e}")
             break
 
-    logger.info(f"Search completed, found {len(all_images)} images, {len(sequences)} sequences")
-    return list(sequences), all_images, sequences_by_date
+    # 4. If search is completed, write the currently recorded data
+    if output_file and current_date and current_sequences:
+        write_sequences_for_date(
+            current_date,
+            current_sequences,
+            sequence_timestamps,
+            output_file
+        )
+        logger.info(f"✅ Written final date {current_date} with {len(current_sequences)} sequences")
+        total_sequences += len(current_sequences)
 
-def analyze_sequences(sequences, images):
-    """Analyze sequences information"""
-    logger.info("\n=== Sequences Analysis ===")
-
-    # Sort sequences by time
-    sequence_info = {}
-    for img in images:
-        if 'sequence' in img and img['sequence']:
-            seq_id = img['sequence']
-            if seq_id not in sequence_info:
-                sequence_info[seq_id] = {
-                    'image_count': 0,
-                    'first_image': None,
-                    'last_image': None,
-                    'created_at': None
-                }
-
-            sequence_info[seq_id]['image_count'] += 1
-
-            # Record time information
-            if 'created_at' in img:
-                img_time = img['created_at']
-                if sequence_info[seq_id]['first_image'] is None or img_time < sequence_info[seq_id]['first_image']:
-                    sequence_info[seq_id]['first_image'] = img_time
-                if sequence_info[seq_id]['last_image'] is None or img_time > sequence_info[seq_id]['last_image']:
-                    sequence_info[seq_id]['last_image'] = img_time
-                    sequence_info[seq_id]['created_at'] = img_time
-
-    # Show top 10 sequences information
-    sorted_sequences = sorted(sequence_info.items(), key=lambda x: x[1]['created_at'] or 0, reverse=True)
-
-    logger.info(f"Top 10 sequences information:")
-    for i, (seq_id, info) in enumerate(sorted_sequences[:10], 1):
-        logger.info(f"{i:2d}. {seq_id}")
-        logger.info(f"    Image count: {info['image_count']}")
-        if info['created_at']:
-            from datetime import datetime
-            dt = datetime.fromtimestamp(info['created_at'] / 1000)
-            logger.info(f"    Latest image: {dt.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("")
-
-def save_sequences_to_file_by_date(sequences_by_date, username, filename=None, max_pages=None, camera_type_filter=None, filter_type=None):
-    """Save sequences to file grouped by date"""
-    if filename is None:
-        filename = f"sequences_{username}.txt"
-
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            total_sequences = sum(len(seqs) for seqs in sequences_by_date.values())
-            f.write(f"# Found Sequences (Total: {total_sequences})\n")
-            f.write(f"# Search User: {username}\n")
-            f.write(f"# Search Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"# Max Pages: {max_pages if max_pages else 'All'}\n")
-            f.write(f"# Camera Type Filter: {camera_type_filter if camera_type_filter else 'All'}\n")
-            f.write(f"# Filter Type: {filter_type if filter_type else 'all'}\n\n")
-
-            # Sort dates in descending order (newest first)
-            for date in sorted(sequences_by_date.keys(), reverse=True):
-                f.write(f"# {date}\n")
-                for seq in sorted(sequences_by_date[date]):
-                    f.write(f"{seq}\n")
-                f.write("\n")  # Add empty line between dates
-
-        logger.info(f"Sequences saved to {filename}")
-        return filename
-    except Exception as e:
-        logger.error(f"Error saving file: {e}")
-        return None
+    logger.info(f"Search completed, found {total_sequences} sequences")
+    return total_sequences, sequence_timestamps
 
 def main():
     """Main program"""
@@ -205,20 +236,6 @@ def main():
     elif args.filter == 'regular':
         camera_type_filter = "perspective"
 
-    # Interactive filter selection if not specified via command line
-    if camera_type_filter is None and args.filter == 'all':
-        print("\nCamera type filter options:")
-        print("1. All photos (default)")
-        print("2. 360 photos only")
-        print("3. Regular photos only")
-
-        filter_choice = input("Choose filter (1-3, default=1): ").strip()
-
-        if filter_choice == "2":
-            camera_type_filter = "spherical"
-        elif filter_choice == "3":
-            camera_type_filter = "perspective"
-
     print(f"\nStarting search for sequences of user '{username}'...")
     if max_pages:
         print(f"Maximum {max_pages} pages")
@@ -229,46 +246,32 @@ def main():
     # Prepare output file
     output_file = f"sequences_{username}.txt"
 
-    # Clear existing file and add header
-    try:
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(f"# Found Sequences (Search in progress...)\n")
-            f.write(f"# Search User: {username}\n")
-            f.write(f"# Search Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"# Max Pages: {max_pages if max_pages else 'All'}\n")
-            f.write(f"# Camera Type Filter: {camera_type_filter if camera_type_filter else 'All'}\n")
-            f.write(f"# Filter Type: {args.filter}\n\n")
-        print(f"📝 Output file prepared: {output_file}")
-    except Exception as e:
-        logger.error(f"Error preparing output file: {e}")
-        print(f"❌ Error preparing output file: {e}")
+    # Write file header
+    if not write_file_header(output_file, username, max_pages, camera_type_filter):
+        print(f"❌ Error preparing output file")
         return
 
-    # Search sequences with real-time file writing
-    sequences, images, sequences_by_date = get_all_user_sequences(username, max_pages, camera_type_filter, output_file)
+    print(f"📝 Output file prepared: {output_file}")
 
-    if not sequences:
+    # Search sequences with real-time file writing
+    total_sequences, sequence_timestamps = get_all_user_sequences(
+        username, max_pages, camera_type_filter, output_file
+    )
+
+    if total_sequences == 0:
         print("No sequences found")
         return
 
     # Show results
     print(f"\n=== Search Results ===")
-    print(f"Found {len(sequences)} sequences:")
-    for i, seq in enumerate(sorted(sequences), 1):
-        print(f"{i:2d}. {seq}")
+    print(f"Found {total_sequences} sequences")
 
-    # Analyze sequences
-    analyze_sequences(sequences, images)
+    # Show date summary
+    print(f"\n=== Summary ===")
 
-    # Save sequences grouped by date
-    try:
-        save_sequences_to_file_by_date(sequences_by_date, username, output_file, max_pages, camera_type_filter, args.filter)
-        print(f"\n✅ All sequences saved to {output_file} (grouped by date)")
-        print(f"\nYou can use the following command for batch download:")
-        print(f"python3 batch_downloader.py {output_file}")
-    except Exception as e:
-        logger.error(f"Error saving sequences by date: {e}")
-        print(f"\n❌ Error saving sequences by date: {e}")
+    print(f"\n✅ All sequences saved to {output_file}")
+    print(f"\nYou can use the following command for batch download:")
+    print(f"python3 batch_downloader.py {output_file}")
 
     print(f"\nSearch completed!")
 
