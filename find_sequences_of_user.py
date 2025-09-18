@@ -145,12 +145,14 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
                         if current_date is None:
                             current_date = img_date
                             current_sequences = set()
+                            logger.info(f"📅 Found first date: {img_date}")
 
                         # 2. Continue recording sequences for the current date
                         if img_date == current_date:
                             current_sequences.add(seq_id)
                         # 3. When a new date is discovered
                         elif img_date != current_date:
+                            logger.info(f"📅 Found new date: {img_date}")
                             # a. Write the currently recorded data
                             if output_file and current_date and current_sequences:
                                 write_sequences_for_date(
@@ -187,10 +189,9 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
             sequence_timestamps,
             output_file
         )
-        logger.info(f"✅ Written final date {current_date} with {len(current_sequences)} sequences")
+        logger.info(f"✅ Written final date {current_date}")
         total_sequences += len(current_sequences)
 
-    logger.info(f"Search completed, found {total_sequences} sequences")
     return total_sequences, sequence_timestamps
 
 def main():
@@ -205,9 +206,9 @@ def main():
 
     args = parser.parse_args()
 
-    print("=== Mapillary User Sequences Finder ===")
-    print("Search for all sequences of a user using creator_username")
-    print()
+    logger.info("=== Mapillary User Sequences Finder ===")
+    logger.info("Search for all sequences of a user using creator_username")
+    logger.info("")
 
     # Get username
     if args.username:
@@ -236,12 +237,12 @@ def main():
     elif args.filter == 'regular':
         camera_type_filter = "perspective"
 
-    print(f"\nStarting search for sequences of user '{username}'...")
+    logger.info(f"Starting search for sequences of user '{username}'...")
     if max_pages:
-        print(f"Maximum {max_pages} pages")
+        logger.info(f"Maximum {max_pages} pages")
     if camera_type_filter:
-        print(f"Filtering for camera type: {camera_type_filter}")
-    print()
+        logger.info(f"Filtering for camera type: {camera_type_filter}")
+    logger.info("")
 
     # Prepare output file
     output_file = f"sequences_{username}.txt"
@@ -251,7 +252,7 @@ def main():
         print(f"❌ Error preparing output file")
         return
 
-    print(f"📝 Output file prepared: {output_file}")
+    logger.info(f"📝 Output file prepared: {output_file}")
 
     # Search sequences with real-time file writing
     total_sequences, sequence_timestamps = get_all_user_sequences(
@@ -259,21 +260,15 @@ def main():
     )
 
     if total_sequences == 0:
-        print("No sequences found")
+        logger.info("No sequences found")
         return
 
     # Show results
-    print(f"\n=== Search Results ===")
-    print(f"Found {total_sequences} sequences")
-
-    # Show date summary
-    print(f"\n=== Summary ===")
-
-    print(f"\n✅ All sequences saved to {output_file}")
-    print(f"\nYou can use the following command for batch download:")
-    print(f"python3 batch_downloader.py {output_file}")
-
-    print(f"\nSearch completed!")
+    logger.info("=== Search Results ===")
+    logger.info(f"Found {total_sequences} sequences")
+    logger.info(f"✅ All sequences saved to {output_file}")
+    logger.info(f"You can use the following command for batch download:")
+    logger.info(f"python3 batch_downloader.py {output_file}")
 
 if __name__ == "__main__":
     main()
