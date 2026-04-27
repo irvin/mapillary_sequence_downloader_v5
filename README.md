@@ -117,7 +117,7 @@ Create a text file with image IDs (one per line):
 ### 2. Find All Sequences for a User
 
 ```bash
-python3 find_sequences_of_user.py [username] [-p MAX_PAGES] [-f FILTER]
+python3 find_sequences_of_user.py [username] [-p MAX_PAGES] [-f FILTER] [--start-date DATE] [--end-date DATE]
 ```
 
 **Examples:**
@@ -135,6 +135,12 @@ python3 find_sequences_of_user.py irvinfly -f 360
 # Search only regular photos
 python3 find_sequences_of_user.py irvinfly -f regular
 
+# Search only regular photos captured on or before 2024-12-31
+python3 find_sequences_of_user.py irvinfly -f regular --end-date 20241231
+
+# Search only regular photos in a date range
+python3 find_sequences_of_user.py irvinfly -f regular --start-date 20240101 --end-date 20241231
+
 # Limit search to 5 pages
 python3 find_sequences_of_user.py irvinfly -f 360 -p 5
 ```
@@ -145,10 +151,19 @@ python3 find_sequences_of_user.py irvinfly -f 360 -p 5
 - `360` - 360° photos only (camera_type: "spherical")
 - `regular` - Regular photos only (camera_type: "perspective")
 
+**Date Options:**
+
+- `--start-date DATE` - Search images captured on or after this date
+- `--end-date DATE` - Search images captured on or before this date
+- Date format can be `YYYYMMDD` or `YYYY-MM-DD`
+- Date filtering is sent to the Mapillary Graph API as `start_captured_at` / `end_captured_at`
+- Camera type filtering is applied locally after each API page is fetched, because the `/images` endpoint does not honor `camera_type` / `image_type` query filters
+
 This will:
 
 - Search for all sequences belonging to a specific username
 - Filter by camera type (360 or regular)
+- Filter by capture date when date options are provided
 - Display detailed analysis of each sequence
 - Save sequence IDs to a text file for batch processing
 
@@ -180,10 +195,13 @@ python3 find_sequences_of_user.py irvinfly -f 360
 # 3. Find only regular photo sequences
 python3 find_sequences_of_user.py irvinfly -f regular
 
-# 4. Batch download all found sequences
+# 4. Find regular photo sequences captured on or before 2024-12-31
+python3 find_sequences_of_user.py irvinfly -f regular --end-date 20241231
+
+# 5. Batch download all found sequences
 python3 batch_downloader.py sequences_irvinfly.txt
 
-# 5. Batch download with specific quality
+# 6. Batch download with specific quality
 python3 batch_downloader.py sequences_irvinfly.txt -q 95
 ```
 

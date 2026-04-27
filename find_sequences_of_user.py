@@ -23,7 +23,7 @@ Output Format:
 - Each date block separated by empty lines
 
 Usage:
-python3 find_sequences_of_user.py <username> [-p <max_pages>] [-f <filter>]
+python3 find_sequences_of_user.py <username> [-p <max_pages>] [-f <filter>] [--start-date <date>] [--end-date <date>]
 
 Parameters:
 - username: Mapillary username to search for
@@ -32,16 +32,21 @@ Parameters:
   - all: Search all types
   - 360: Search only 360-degree photos (spherical)
   - regular: Search only perspective photos
+- --start-date: Only search images captured on or after this date (YYYYMMDD or YYYY-MM-DD)
+- --end-date: Only search images captured on or before this date (YYYYMMDD or YYYY-MM-DD)
 
 Examples:
 python3 find_sequences_of_user.py username -p 50 -f regular
 python3 find_sequences_of_user.py username -f 360
+python3 find_sequences_of_user.py username -f regular --end-date 20240921
+python3 find_sequences_of_user.py username -f regular --start-date 20240101 --end-date 20240921
 """
 
 import requests
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from urllib.parse import urlencode
 from config import access_token
 
 # Setup logging
@@ -49,7 +54,29 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-def write_file_header(filename, username, max_pages, camera_type_filter):
+def parse_date_arg(value, end_of_day=False):
+    """Parse YYYYMMDD or YYYY-MM-DD into a Mapillary API UTC timestamp string."""
+    if not value:
+        return None
+
+    normalized = value.strip()
+    for date_format in ('%Y%m%d', '%Y-%m-%d'):
+        try:
+            parsed_date = datetime.strptime(normalized, date_format)
+            break
+        except ValueError:
+            parsed_date = None
+
+    if parsed_date is None:
+        raise ValueError(f"Invalid date '{value}'. Use YYYYMMDD or YYYY-MM-DD.")
+
+    if end_of_day:
+        parsed_date = parsed_date.replace(hour=23, minute=59, second=59)
+
+    return parsed_date.replace(tzinfo=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def write_file_header(filename, username, max_pages, camera_type_filter, start_captured_at=None, end_captured_at=None):
     """Write file header with search parameters"""
     try:
         with open(filename, 'w', encoding='utf-8') as f:
@@ -57,7 +84,9 @@ def write_file_header(filename, username, max_pages, camera_type_filter):
             f.write(f"# User: {username}\n")
             f.write(f"# Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
             f.write(f"# Max Pages: {max_pages if max_pages else 'All'}\n")
-            f.write(f"# Image Type Filter: {camera_type_filter if camera_type_filter else 'All'}\n\n")
+            f.write(f"# Image Type Filter: {camera_type_filter if camera_type_filter else 'All'}\n")
+            f.write(f"# Start Captured At: {start_captured_at if start_captured_at else 'None'}\n")
+            f.write(f"# End Captured At: {end_captured_at if end_captured_at else 'None'}\n\n")
         return True
     except Exception as e:
         logger.error(f"Error writing file header: {e}")
@@ -87,7 +116,8 @@ def write_sequences_for_date(date, sequences, sequence_timestamps, filename):
         logger.error(f"Error writing date {date} to file: {e}")
         return False
 
-def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, output_file=None):
+def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, output_file=None,
+                           start_captured_at=None, end_captured_at=None):
     """Get all sequences for specified user with optional camera type filtering"""
     header = {'Authorization': f'OAuth {access_token}'}
     sequence_timestamps = {}  # Store timestamp for each sequence
@@ -96,7 +126,18 @@ def get_all_user_sequences(username, max_pages=None, camera_type_filter=None, ou
     total_sequences = 0  # Count total sequences found
 
     # First page - include camera_type in fields
-    url = f'https://graph.mapillary.com/images?fields=id,sequence,creator,created_at,camera_type,captured_at&creator_username={username}&limit=100'
+    query_params = {
+        'fields': 'id,sequence,creator,created_at,camera_type,captured_at',
+        'creator_username': username,
+        'limit': 100,
+    }
+    if start_captured_at:
+        query_params['start_captured_at'] = start_captured_at
+    if end_captured_at:
+        # Mapillary Graph API honors end_captured_at. max_captured_at is ignored by this endpoint.
+        query_params['end_captured_at'] = end_captured_at
+
+    url = f"https://graph.mapillary.com/images?{urlencode(query_params)}"
 
     page = 1
     while url and (max_pages is None or page <= max_pages):
@@ -199,6 +240,10 @@ def main():
     parser.add_argument('-p', '--max-pages', type=int, help='Maximum number of pages to search')
     parser.add_argument('-f', '--filter', choices=['all', '360', 'regular'],
                        default='all', help='Filter by camera type (360=spherical, regular=perspective)')
+    parser.add_argument('--start-date',
+                       help='Only search images captured on or after this date (YYYYMMDD or YYYY-MM-DD)')
+    parser.add_argument('--end-date',
+                       help='Only search images captured on or before this date (YYYYMMDD or YYYY-MM-DD)')
 
     args = parser.parse_args()
 
@@ -217,6 +262,13 @@ def main():
     # Get page limit (None means search all pages)
     max_pages = args.max_pages
 
+    try:
+        start_captured_at = parse_date_arg(args.start_date, end_of_day=False)
+        end_captured_at = parse_date_arg(args.end_date, end_of_day=True)
+    except ValueError as e:
+        logger.error(e)
+        return
+
     # Get camera type filter
     camera_type_filter = None
     if args.filter == '360':
@@ -229,12 +281,25 @@ def main():
         logger.info(f"Maximum {max_pages} pages")
     if camera_type_filter:
         logger.info(f"Filtering for camera type: {camera_type_filter}")
+    if start_captured_at:
+        logger.info(f"Start captured at: {start_captured_at}")
+    if end_captured_at:
+        logger.info(f"End captured at: {end_captured_at}")
 
     # Prepare output file
-    output_file = f"sequences_{username}.txt"
+    output_suffix = ""
+    if start_captured_at or end_captured_at:
+        date_parts = []
+        if start_captured_at:
+            date_parts.append(f"from_{args.start_date.replace('-', '')}")
+        if end_captured_at:
+            date_parts.append(f"to_{args.end_date.replace('-', '')}")
+        output_suffix = "_" + "_".join(date_parts)
+    output_file = f"sequences_{username}{output_suffix}.txt"
 
     # Write file header
-    if not write_file_header(output_file, username, max_pages, camera_type_filter):
+    if not write_file_header(output_file, username, max_pages, camera_type_filter,
+                             start_captured_at, end_captured_at):
         print(f"❌ Error preparing output file")
         return
 
@@ -243,7 +308,8 @@ def main():
 
     # Search sequences with real-time file writing
     total_sequences, sequence_timestamps = get_all_user_sequences(
-        username, max_pages, camera_type_filter, output_file
+        username, max_pages, camera_type_filter, output_file,
+        start_captured_at, end_captured_at
     )
 
     if total_sequences == 0:
