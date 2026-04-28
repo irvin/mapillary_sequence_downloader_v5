@@ -183,7 +183,53 @@ python3 batch_downloader.py sequences_irvinfly.txt
 python3 batch_downloader.py sequences_irvinfly.txt -q 95
 ```
 
-### 4. Complete Workflow
+### 4. Download Images from Personal Data Takeout
+
+If you requested a Mapillary personal data download, the takeout may include an
+`images.tsv` file. You can download images directly from that TSV without first
+reconstructing sequence IDs:
+
+```bash
+python3 download_takeout_images.py takeout_20260429/images.tsv
+```
+
+**Examples:**
+
+```bash
+# Count matching rows without downloading
+python3 download_takeout_images.py takeout_20260429/images.tsv --dry-run
+
+# Download only regular perspective photos
+python3 download_takeout_images.py takeout_20260429/images.tsv -f regular
+
+# Download only regular perspective photos captured on or before 2024-12-31
+python3 download_takeout_images.py takeout_20260429/images.tsv -f regular --end-date 20241231
+
+# Test with the first 10 matching images
+python3 download_takeout_images.py takeout_20260429/images.tsv -f regular --limit 10
+
+# Choose output directory and worker count
+python3 download_takeout_images.py takeout_20260429/images.tsv -o takeout_downloads --workers 4
+```
+
+The script reads `img_fbid` values from the TSV, fetches `thumb_original_url`
+from the Mapillary Graph API, and writes the returned bytes directly to disk.
+`thumb_original_url` is the highest-resolution Mapillary rendition exposed by
+the API, but it is not guaranteed to be the original camera file before upload.
+
+Unlike `sequence_downloader.py`, this takeout downloader does not open and
+re-save the JPEG with Pillow, so it avoids an extra JPEG re-encode.
+
+Downloaded files are grouped by captured date:
+
+```text
+takeout_downloads/
+└── 20231202/
+    ├── 20231202_085753_000_1053351725708020.jpg
+    └── ...
+```
+
+### 5. Complete Workflow
 
 ```bash
 # 1. Find all sequences for a user (all photos)
@@ -203,6 +249,9 @@ python3 batch_downloader.py sequences_irvinfly.txt
 
 # 6. Batch download with specific quality
 python3 batch_downloader.py sequences_irvinfly.txt -q 95
+
+# 7. Or download directly from personal data takeout without sequence IDs
+python3 download_takeout_images.py takeout_20260429/images.tsv -f regular --end-date 20241231
 ```
 
 ## File Structure
@@ -212,6 +261,7 @@ mapillary_sequence_downloader_v4/
 ├── sequence_downloader.py        # Main download script
 ├── find_sequences_of_user.py     # User sequence finder
 ├── batch_downloader.py           # Batch download script
+├── download_takeout_images.py    # Direct downloader for takeout images.tsv
 ├── config.py                     # Config file (not uploaded to git)
 ├── config.example.py             # Example config file
 ├── .gitignore                    # Git ignore file
